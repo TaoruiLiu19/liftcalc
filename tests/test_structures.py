@@ -7,6 +7,10 @@ import math
 import pytest
 
 from liftcalc.codecheck.steel_gb import check_slenderness, slenderness
+from liftcalc.core.errors import InfeasibleSectionError, OutOfTableError
+from liftcalc.core.result import Verdict
+from liftcalc.core.tolerance import close
+from liftcalc.core.units import Q
 from liftcalc.crane.select import (
     CapacityRow,
     OutriggerLayout,
@@ -16,10 +20,6 @@ from liftcalc.crane.select import (
     lookup_capacity,
     outrigger_reactions,
 )
-from liftcalc.core.errors import InfeasibleSectionError, OutOfTableError
-from liftcalc.core.result import Verdict
-from liftcalc.core.tolerance import close
-from liftcalc.core.units import Q
 from liftcalc.fea.frame2d import FrameElement, FrameNode, NodalLoad, Support, solve_frame
 from liftcalc.lifting.beam import BeamInput, check_beam
 from liftcalc.lifting.rigging import (
@@ -156,7 +156,8 @@ def test_rigging_full_chain() -> None:
     )
     checks = _by_id(outcome)
     assert "rigging.rope" in checks
-    assert checks["rigging.rope"].verdict is Verdict.FAIL  # 252kN 破断 < 241.2×6=1447kN 需求  # type: ignore[attr-defined]
+    # 252kN 破断 < 241.2×6=1447kN 需求
+    assert checks["rigging.rope"].verdict is Verdict.FAIL  # type: ignore[attr-defined]
     assert checks["rigging.shackle"].verdict is Verdict.PASS  # type: ignore[attr-defined]
 
 

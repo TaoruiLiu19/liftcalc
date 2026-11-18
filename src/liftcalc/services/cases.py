@@ -262,6 +262,10 @@ class CapabilityCase(CaseEnvelope):
     left_share: float = 0.6
     asynchronism: float = 1.0
     required_lift_height: float | None = None
+    # 以下三项只影响立面图的示意尺寸，不参与能力反查
+    load_width_m: float = Field(default=3.2, gt=0)
+    load_height_m: float = Field(default=3.8, gt=0)
+    clearance_m: float = Field(default=1.0, ge=0)
 
 
 class FrameNodeModel(BaseModel):

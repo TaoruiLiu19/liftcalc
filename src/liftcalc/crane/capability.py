@@ -37,7 +37,6 @@ class Verdict:
     boom_len: float | None = None
     boom_angle: float | None = None
     lift_height: float | None = None
-    config: str = ""
     rated_load: float | None = None
     utilization: float | None = None
     config: str | None = None

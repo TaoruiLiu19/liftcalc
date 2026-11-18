@@ -95,6 +95,8 @@ pip install pint numpy pydantic python-docx ezdxf typer PyYAML pytest hypothesis
 | `--dynamic-factor` | 动载系数 | 默认 1.1 |
 | `--limit` | 负荷率上限 | 单机 0.90 / 双机 0.80 |
 | `--required-height` | 所需起升高度 m | 不做净空校核 |
+| `--load-width` / `--load-height` | 图示吊物宽/高 m | 3.2 / 3.8（只影响立面图） |
+| `--clearance` | 图示吊物底距地净空 m | 1.0（只影响立面图） |
 
 ### 3.4 出计算书
 
@@ -115,9 +117,19 @@ pip install pint numpy pydantic python-docx ezdxf typer PyYAML pytest hypothesis
 .\liftcalc.ps1 render --in out\cap.json --out out\png
 ```
 
-图的内容：A3 图框（分区 1–8 / A–H）、汽车吊车身、臂架、吊钩组、吊物、尺寸线（R / H / L / a / 臂端高度，绿色带箭头）、起重性能表、标题栏（含设计/校核/审核/批准）、说明。
+图的内容：
 
-> **绘图状态**：结构和数据都正确，但**精细度还达不到原程序水平**（车身是位图贴的、臂架没有伸缩节细节）。详见交接文档第八节。
+- **图幅**：A3，竖幅/横幅**自动选**（谁的比例大用谁），图框 + 分区 1–8 / A–H
+- **立面**：汽车吊、伸缩臂（含搭接分界）、变幅油缸、臂端滑轮组、起升绳、吊钩组、吊索、吊物
+- **尺寸链**：R / f / g（地面以下）、H / Hz / h1–h3（吊物左侧）、h0（吊钩到臂端）、L（沿臂）、a（仰角弧）、E（铰点高），全部带尺寸界线与箭头
+- **引线标注**：吊钩中心、主臂、索具、回转中心
+- **图面**：右上起重性能表、右下标题栏（含设计/校核/审核/批准）、左下说明 5–6 条
+
+比例是**真实的**：按内容外包框在标准比例梯 1:50 / 1:100 / 1:150 / 1:200 … 里取最大可容的一档，
+所以标题栏、说明里写的比例与图上量出来的一致（过去写死 1:100，实际是 1:131）。
+
+> **两种车身**：SVG/PNG 贴原版车身素材（位图）；DXF 不支持位图块，改画**矢量车身**（车架、五轴、驾驶室、回转台、配重、支腿梁）。
+> 所以 DXF 和 PNG 的车身观感不一样，这是格式限制，不是 bug。
 
 ---
 
@@ -201,10 +213,10 @@ src/liftcalc/
   data/                 机型表读写、校验、导入
   services/calc.py      工况 JSON → 结果 JSON
   report/render.py      Word 计算书
-  drawing/              绘图（primitives / figures / svg / dxf）
+  drawing/              绘图（primitives / style / dim / sheet / body / figures / svg / dxf / png）
 data/pack/crane/        机型表 CSV（数据源，手工维护）
 tools/                  转录、PDF 提取、DXF 预览、PNG 渲染
-tests/                  114 个测试函数
+tests/                  138 个测试函数（含 test_drawing.py 的立面图断言）
 docs/handover/          交接文档（含原版参照图与待办）
 ```
 
@@ -213,6 +225,7 @@ docs/handover/          交接文档（含原版参照图与待办）
 ## 八、限制与免责
 
 - 只覆盖 **4 个机型 716 格**，其余需自行补录
+- 立面图是**能力反查示意图**：吊物按方框示意，车身、臂架为简化线稿，不是施工图
 - 未做风载、偏心、多机不同步的动力分析，只用系数简化
 - 原厂表只给**支腿全伸**工况
 - 计算书里的"限值"（负荷率 90%/80% 等）是**工程惯例取值，待专家核定**

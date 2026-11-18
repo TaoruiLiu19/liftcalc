@@ -51,7 +51,7 @@ def test_missing_source_ref_is_caught(tmp_path: Path) -> None:
     db = tmp_path / "nosrc.sqlite"
     try:
         build_db(pack, db, "test")
-    except Exception as exc:  # noqa: BLE001 - 导入器应显式拒绝
+    except Exception as exc:
         assert "source_ref" in str(exc)
     else:  # pragma: no cover
         raise AssertionError("导入器应拒绝缺少 source_ref 的数据")

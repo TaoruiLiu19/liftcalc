@@ -43,9 +43,8 @@ def validate_db(db_path: Path) -> ValidationReport:
             family = str(row["family"])
             if family != "BAR" and (row["b"] is None or float(row["b"]) <= 0):
                 report.issues.append(f"型钢 {label} 的 b 必须为正")
-            if family in {"H", "I", "C", "T", "L"}:
-                if row["tw"] is None or float(row["tw"]) <= 0:
-                    report.issues.append(f"型钢 {label} 缺少有效厚度 tw")
+            if family in {"H", "I", "C", "T", "L"} and (row["tw"] is None or float(row["tw"]) <= 0):
+                report.issues.append(f"型钢 {label} 缺少有效厚度 tw")
 
         materials = conn.execute("SELECT * FROM material").fetchall()
         report.checked["material"] = len(materials)

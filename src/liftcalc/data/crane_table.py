@@ -208,15 +208,15 @@ def validate_capacity(
         series = booms[(config_label, boom_len)]
         declared_max = next((row.boom_max_angle for row in series if row.boom_max_angle is not None), None)
         declared_min = next((row.boom_min_angle for row in series if row.boom_min_angle is not None), None)
-        if declared_max is not None and series[0].boom_angle is not None:
-            if abs(series[0].boom_angle - declared_max) > 0.05:
-                report.errors.append(
+        if (declared_max is not None and series[0].boom_angle is not None
+                and abs(series[0].boom_angle - declared_max) > 0.05):
+            report.errors.append(
                     f"{boom_len:g} m 臂：首行仰角 {series[0].boom_angle:g}° 与表头最大仰角 "
                     f"{declared_max:g}° 不一致（疑似漏录/多录行）"
                 )
-        if declared_min is not None and series[-1].boom_angle is not None:
-            if abs(series[-1].boom_angle - declared_min) > 0.05:
-                report.errors.append(
+        if (declared_min is not None and series[-1].boom_angle is not None
+                and abs(series[-1].boom_angle - declared_min) > 0.05):
+            report.errors.append(
                     f"{boom_len:g} m 臂：末行仰角 {series[-1].boom_angle:g}° 与表头最小仰角 "
                     f"{declared_min:g}° 不一致（疑似漏录/多录行）"
                 )

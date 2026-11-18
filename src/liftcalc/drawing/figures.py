@@ -1,23 +1,28 @@
-"""由计算结果生成简图（设计 §11）。
+"""由计算结果生成图（设计 §11）。
 
-只做"看懂"级示意图：不做施工图、不做三维、不追求 CAD 精度。
+三类图：
+    capability_figure  幅度—起重量能力曲线
+    elevation_figure   吊装立面图（A3 竖幅，图框/标题栏/性能表/尺寸链/引线标注）
+    eye_figure / section_figure  吊耳、截面简图
+
+立面图约定：模型坐标 x 指向吊物方向（m），y 向上，原点在回转中心地面。
+图面坐标 x 向左为正（吊物在图左、车身在图右，与原版图纸一致）。
 """
 
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from liftcalc.core.result import ComputationResult
+from liftcalc.drawing import dim as D
+from liftcalc.drawing import sheet as S
+from liftcalc.drawing.body import draw_truck
 from liftcalc.drawing.primitives import (
-    LAYER_CENTER,
-    LAYER_DIM,
-    LAYER_HIDDEN,
-    LAYER_NOTE,
-    LAYER_TEXT,
-    LAYER_RIGGING,
-    LAYER_THIN,
+    ALIGN_CENTER,
+    ALIGN_RIGHT,
     Circle,
     Figure,
     Line,
@@ -25,17 +30,65 @@ from liftcalc.drawing.primitives import (
     Text,
 )
 from liftcalc.drawing.primitives import Image as DrawingImage
+from liftcalc.drawing.style import (
+    LAYER_CENTER,
+    LAYER_DIM,
+    LAYER_NOTE,
+    LAYER_OUTLINE,
+    LAYER_RIGGING,
+    LAYER_TEXT,
+    LAYER_THIN,
+    SCALE_LADDER,
+)
 
 NOT_TO_SCALE = "示意图 · 不按比例"
 
+# ---- 立面图几何常数（单位 m，可按机型调整） -------------------------------
+# 臂架铰点离地高：取 4.7 m 使 臂端高度 = 4.7 + L·sin a 与性能表的数据自洽
+# （QY70K-1 临界格 4.7+25.98·sin67.6° = 28.72 m，额定起升高度 24.43 m，
+#  两者相差 4.3 m，正好容纳吊钩组与最小绳长）。
+HINGE_H = 4.7
+BOOM_HALF_FOOT = 0.80     # 臂根半宽
+BOOM_HALF_TIP = 0.58      # 臂端半宽
+BOOM_JOINTS = (0.30, 0.52, 0.72, 0.88)   # 伸缩节搭接位置（占臂长比例）
+BODY_LEN = 13.6           # 车身总长
+BODY_REAR = 3.6           # 车尾（含配重）距回转中心；与素材上的臂架铰点对齐
+BODY_FRONT = BODY_LEN - BODY_REAR
+BODY_RATIO = 126.0 / 380.0   # 车身素材高宽比
+BLOCK_W = 0.90            # 吊钩组筒体宽
+BLOCK_H = 2.40            # 吊钩组筒体高
+BLOCK_GAP = 0.40          # 筒体底到吊钩中心
+SHEAVE_R = 0.55           # 臂端滑轮半径
+SLING_RATIO = 0.55        # 吊索水平投影 → 竖直高度
+ROPE_MIN = 1.6            # 无起升高度数据时，吊钩组顶距臂端的最小绳长
+DEFAULT_LOAD_W = 3.2
+DEFAULT_LOAD_H = 3.8
 
-def _padding(figure: Figure, ratio: float = 0.12) -> None:
-    pad_x = figure.width * ratio
-    pad_y = figure.height * ratio
-    figure.width += 2 * pad_x
-    figure.height += 2 * pad_y
+# ---- 尺寸链位置（相对吊物远边的图面偏移，mm） -----------------------------
+CHAIN_HZ = -20.5           # 地面→臂端
+CHAIN_H = -13.5            # 地面→吊钩中心
+CHAIN_H123 = -7.0          # h1/h2/h3
 
 
+
+def _fit_paper(figure: Figure, ratio: float = 0.10) -> Figure:
+    """把图元整体平移进第一象限并留边，同时设置图幅。
+
+    吊耳/截面的图元常常以形心为原点（含负坐标），不平移就会被画到纸外。
+    """
+    x0, y0, x1, y1 = figure.bbox()
+    span = max(x1 - x0, y1 - y0, 1.0)
+    pad = span * ratio
+    dx, dy = pad - x0, pad - y0
+    figure.primitives = _shift(figure.primitives, dx, dy)
+    figure.width = (x1 - x0) + 2 * pad
+    figure.height = (y1 - y0) + 2 * pad
+    return figure
+
+
+# ===========================================================================
+# 吊耳 / 截面简图
+# ===========================================================================
 def eye_figure(result: ComputationResult) -> Figure | None:
     aux: dict[str, Any] = result.aux
     if aux.get("figure") != "lifting_eye":
@@ -58,15 +111,14 @@ def eye_figure(result: ComputationResult) -> Figure | None:
         Circle(cx=0.0, cy=0.0, r=d / 2),
         Line(x1=-(d / 2 + 10), y1=0.0, x2=(d / 2 + 10), y2=0.0, layer=LAYER_CENTER),
         Line(x1=0.0, y1=-(d / 2 + 10), x2=0.0, y2=(d / 2 + 10), layer=LAYER_CENTER),
-        Text(x=x0, y=y1 + 6, content=f"板 {plate['b_mm']:.0f}×{plate['h_mm']:.0f}×{plate['t_mm']:.0f}"),
-        Text(x=x0, y=y0 - 12, content=f"孔径 d={d:.0f}   孔边距 e={e:.0f}", height=3.5),
-        Text(x=x1 + 4, y=0.0, content="受力方向", layer=LAYER_DIM),
+        Text(x=x0, y=y1 + 3.5, content=f"板 {plate['b_mm']:.0f}×{plate['h_mm']:.0f}×{plate['t_mm']:.0f}"),
+        Text(x=x0, y=y0 - 3.5, content=f"孔径 d={d:.0f}   孔边距 e={e:.0f}", height=3.5),
+        Text(x=x1 + 4, y=1.75, content="受力方向", layer=LAYER_DIM),
         Line(x1=x1, y1=0.0, x2=x1 + 18, y2=0.0, layer=LAYER_DIM),
         Line(x1=x1 + 18, y1=0.0, x2=x1 + 12, y2=3.0, layer=LAYER_DIM),
         Line(x1=x1 + 18, y1=0.0, x2=x1 + 12, y2=-3.0, layer=LAYER_DIM),
     )
-    _padding(figure)
-    return figure
+    return _fit_paper(figure)
 
 
 def section_figure(result: ComputationResult) -> Figure | None:
@@ -92,13 +144,16 @@ def section_figure(result: ComputationResult) -> Figure | None:
     figure.add(
         Line(x1=cx - mark, y1=cy, x2=cx + mark, y2=cy, layer=LAYER_CENTER),
         Line(x1=cx, y1=cy - mark, x2=cx, y2=cy + mark, layer=LAYER_CENTER),
-        Text(x=cx + mark, y=cy + mark, content="形心", height=mark * 0.9, layer=LAYER_TEXT),
-        Text(x=x0, y=y0 - 12, content=f"外包 {width:.0f} × {height:.0f}", height=3.5, layer=LAYER_NOTE),
+        Text(x=cx + mark, y=cy + mark + 3.5, content="形心", height=3.5, layer=LAYER_TEXT),
+        Text(x=x0, y=y0 - 3.5, content=f"外包 {width:.0f} × {height:.0f}", height=3.5,
+             layer=LAYER_NOTE),
     )
-    _padding(figure)
-    return figure
+    return _fit_paper(figure)
 
 
+# ===========================================================================
+# 能力曲线
+# ===========================================================================
 def capability_figure(result: ComputationResult) -> Figure | None:
     """幅度—起重量能力曲线：每个臂长一条，标出吊重水平线与临界点。"""
     cap = result.aux.get("capability") or {}
@@ -115,25 +170,26 @@ def capability_figure(result: ComputationResult) -> Figure | None:
     def xy(radius: float, load: float) -> tuple[float, float]:
         return pad + radius * sx, pad + load * sy
 
-    figure = Figure(title="幅度—起重量能力曲线", width=width, height=height, notes=["示意图 · 坐标非等比例"])
+    figure = Figure(title="幅度—起重量能力曲线", width=width, height=height,
+                    notes=["示意图 · 坐标非等比例"])
 
-    # 坐标轴
     figure.add(
         Line(x1=pad, y1=pad, x2=width - pad, y2=pad),
         Line(x1=pad, y1=pad, x2=pad, y2=height - pad),
-        Text(x=width / 2 - 10, y=pad - 17, content="幅度 (m)", height=3.6),
+        Text(x=width / 2, y=pad - 11.0, content="幅度 (m)", height=3.6, align=ALIGN_CENTER),
         Text(x=2, y=height - pad + 9, content="额定起重量 (t)", height=3.5),
     )
     for radius in range(0, int(max_radius) + 1, 5):
         x, _ = xy(radius, 0)
         figure.add(Line(x1=x, y1=pad, x2=x, y2=pad - 2, layer=LAYER_DIM),
-                   Text(x=x - 2, y=pad - 7, content=str(radius), height=3.0))
+                   Text(x=x, y=pad - 7.0, content=str(radius), height=3.0,
+                        align=ALIGN_CENTER))
     for load in range(0, int(max_load) + 1, 10):
         _, y = xy(0, load)
         figure.add(Line(x1=pad, y1=y, x2=pad + 2, y2=y, layer=LAYER_DIM),
-                   Text(x=pad - 9, y=y - 1.5, content=str(load), height=3.0))
+                   Text(x=pad - 3, y=y + 1.5, content=str(load), height=3.0,
+                        align=ALIGN_RIGHT))
 
-    # 各臂长曲线
     by_boom: dict[float, list[tuple[float, float]]] = {}
     for boom, radius, load in points:
         by_boom.setdefault(float(boom), []).append((float(radius), float(load)))
@@ -142,348 +198,595 @@ def capability_figure(result: ComputationResult) -> Figure | None:
         pts = tuple(xy(r, q) for r, q in series)
         figure.add(Polyline(points=pts, closed=False))
         figure.add(
-            Text(x=pts[0][0] - 8.5, y=pts[0][1] + 1.0,
-                 content=f"{boom:g}m", height=2.8, layer=LAYER_DIM)
+            Text(x=pts[0][0] - 1.5, y=pts[0][1] + 1.0,
+                 content=f"{boom:g}m", height=2.8, align=ALIGN_RIGHT, layer=LAYER_DIM)
         )
 
-    # 吊重水平线
     required = float(cap.get("required") or 0.0)
     _, y_req = xy(0, required)
     figure.add(
         Line(x1=pad, y1=y_req, x2=width - pad, y2=y_req, layer=LAYER_DIM),
-        Text(x=pad + 2, y=y_req + 2, content=f"计算荷载 {required:.2f} t", height=3.2, layer=LAYER_DIM),
+        Text(x=pad + 2, y=y_req + 2.0, content=f"计算荷载 {required:.2f} t", height=3.2,
+             layer=LAYER_DIM),
     )
 
-    # 临界点
     if cap.get("ok") and cap.get("max_radius") and cap.get("rated_load"):
         cx, cy = xy(float(cap["max_radius"]), float(cap["rated_load"]))
         figure.add(
             Circle(cx=cx, cy=cy, r=2.4, layer=LAYER_CENTER),
-            Text(x=cx + 3, y=cy + 2,
+            Text(x=cx + 3, y=cy + 3.0,
                  content=f"最远 {float(cap['max_radius']):g} m / 额定 {float(cap['rated_load']):g} t",
-                 height=3.2, layer=LAYER_TEXT),
+                 height=3.2),
         )
     return figure
 
 
-def _arrow(figure: Figure, x: float, y: float, dx: float, dy: float) -> None:
-    """开口箭头，方向 (dx, dy)。"""
-    size = 1.7
-    perp = (-dy, dx)
-    figure.add(
-        Line(x1=x, y1=y, x2=x + dx * size + perp[0] * size * 0.45,
-             y2=y + dy * size + perp[1] * size * 0.45, layer=LAYER_DIM),
-        Line(x1=x, y1=y, x2=x + dx * size - perp[0] * size * 0.45,
-             y2=y + dy * size - perp[1] * size * 0.45, layer=LAYER_DIM),
-    )
+# ===========================================================================
+# 吊装立面图
+# ===========================================================================
+@dataclass(frozen=True)
+class ElevationModel:
+    """立面图的几何量（m）。x 指向吊物方向，y 向上，原点 = 回转中心地面。"""
+
+    boom_len: float
+    boom_angle: float          # 度
+    radius: float              # 回转中心 → 吊钩中心水平距
+    hook_h: float              # 吊钩中心高
+    load_w: float
+    load_h: float
+
+    @property
+    def rad(self) -> float:
+        return math.radians(self.boom_angle)
+
+    @property
+    def hinge(self) -> tuple[float, float]:
+        return 0.0, HINGE_H
+
+    @property
+    def tip(self) -> tuple[float, float]:
+        return (self.boom_len * math.cos(self.rad), HINGE_H + self.boom_len * math.sin(self.rad))
+
+    @property
+    def block_top(self) -> float:
+        return self.hook_h + BLOCK_GAP + BLOCK_H
+
+    @property
+    def sling_drop(self) -> float:
+        return SLING_RATIO * max(self.load_w, 1.0)
+
+    @property
+    def load_top(self) -> float:
+        return self.hook_h - self.sling_drop
+
+    @property
+    def load_bottom(self) -> float:
+        return self.load_top - self.load_h
+
+    @property
+    def tip_height(self) -> float:
+        return self.tip[1]
 
 
-def _arrow(figure: Figure, x: float, y: float, dx: float, dy: float) -> None:
-    """开口箭头，方向 (dx, dy)。"""
-    size = 1.7
-    perp = (-dy, dx)
-    figure.add(
-        Line(x1=x, y1=y, x2=x + dx * size + perp[0] * size * 0.45,
-             y2=y + dy * size + perp[1] * size * 0.45, layer=LAYER_DIM),
-        Line(x1=x, y1=y, x2=x + dx * size - perp[0] * size * 0.45,
-             y2=y + dy * size - perp[1] * size * 0.45, layer=LAYER_DIM),
-    )
-
-
-def elevation_figure(result: ComputationResult) -> Figure | None:
-    """吊装立面图（A3 竖幅，1:100）：图框、分区、标题栏、签署栏、说明。"""
-    cap = result.aux.get("capability") or {}
+def _capability_detail(cap: dict[str, Any]) -> dict[str, Any] | None:
     if not cap.get("ok"):
         return None
     detail = cap.get("left") if cap.get("mode") == "dual" else cap
-    boom = detail.get("boom_len")
-    angle = detail.get("boom_angle")
-    radius = detail.get("max_radius")
-    lift = detail.get("lift_height")
-    if not any(value is not None for value in (boom, angle, radius, lift)):
+    if not detail or detail.get("boom_len") is None or detail.get("max_radius") is None:
         return None
+    return detail
 
-    boom = float(boom or 0.0)
-    angle = float(angle or 0.0)
-    radius = float(radius or 0.0)
-    lift = float(lift or 0.0)
 
-    # A3 竖幅 297 x 420，按 1:100 出图
-    width, height = 297.0, 420.0
-    frame_l, frame_b = 25.0, 10.0
-    frame_r, frame_t = 5.0, 5.0
-    draw_l, draw_b = frame_l + 6, frame_b + 96
-    draw_r, draw_t = 22, 24
+def _elevation_model(cap: dict[str, Any], detail: dict[str, Any],
+                     load: dict[str, Any]) -> tuple[ElevationModel, list[str]]:
+    """由性能表临界工况 + 图示吊物尺寸，推出立面图几何。
 
-    BODY_M = 16.0                       # 车身按 16 m 长贴图
-    hinge_y = 4.7                       # 臂架铰点离地高度
-    pivot = (0.0, hinge_y)
-    rad = math.radians(angle)
-    tip = (boom * math.cos(rad), pivot[1] + boom * math.sin(rad))
+    吊钩高度按"吊物底距地净空"反推（净空 + 吊物高 + 吊索高），
+    而不是取性能表的额定起升高度——后者是能力上限，不是本次吊装姿态。
+    """
+    notes: list[str] = []
+    boom_len = float(detail["boom_len"])
+    radius = float(detail["max_radius"])
+    angle = detail.get("boom_angle")
+    if angle is None:
+        ratio = min(max(radius / boom_len, 0.0), 1.0)
+        angle = math.degrees(math.acos(ratio))
+        notes.append("本机型性能表无仰角列，图示仰角按臂长与幅度反算")
+    angle = float(angle)
 
-    x_min, x_max = -12.0, max(tip[0], radius) + 10.0
-    y_min, y_max = -3.0, max(tip[1], lift) + 6.0
-    span_x, span_y = x_max - x_min, y_max - y_min
+    load_w = float(load.get("width") or DEFAULT_LOAD_W)
+    load_h = float(load.get("height") or DEFAULT_LOAD_H)
+    clearance = float(load.get("clearance") if load.get("clearance") is not None else 1.0)
+    sling = SLING_RATIO * max(load_w, 1.0)
+    hook_h = clearance + load_h + sling
 
-    avail_x = width - draw_l - draw_r
-    avail_y = height - draw_b - draw_t
-    scale = min(avail_x / span_x, avail_y / span_y)
+    tip_y = HINGE_H + boom_len * math.sin(math.radians(angle))
+    limit = tip_y - (BLOCK_GAP + BLOCK_H + ROPE_MIN)
+    if hook_h > limit:
+        hook_h = max(limit, 0.4)
+        notes.append("图示净空超出该臂长可达高度，吊钩已按臂端极限绘制")
 
-    def xy(x_m: float, y_m: float) -> tuple[float, float]:
-        return draw_l + (x_m - x_min) * scale, draw_b + (y_m - y_min) * scale
-
-    figure = Figure(title="吊装立面图", width=width, height=height,
-                    notes=["1:100", "A3"])
-
-    # 图框（外框 + 内框）
-    figure.add(Polyline(points=((0.5, 0.5), (width - 0.5, 0.5), (width - 0.5, height - 0.5),
-                                (0.5, height - 0.5)), closed=True, layer=LAYER_TEXT))
-    figure.add(Polyline(points=((frame_l, frame_b), (width - frame_r, frame_b),
-                                (width - frame_r, height - frame_t), (frame_l, height - frame_t)),
-                        closed=True, layer=LAYER_TEXT))
-    # 分区编号
-    for i in range(1, 9):
-        gx = frame_l + (width - frame_l - frame_r) * i / 9.0
-        figure.add(Text(x=gx, y=height - frame_t - 5.0, content=str(i), height=3.0, layer=LAYER_DIM))
-        if gx < width - frame_r - 185.0:
-            figure.add(Text(x=gx, y=frame_b + 2.0, content=str(i), height=3.0, layer=LAYER_DIM))
-        if i < 8:
-            figure.add(Line(x1=gx, y1=frame_b, x2=gx, y2=frame_b + 6, layer=LAYER_TEXT),
-                       Line(x1=gx, y1=height - frame_t, x2=gx, y2=height - frame_t - 6, layer=LAYER_TEXT))
-    for j, letter in enumerate("ABCDEFGH", start=1):
-        gy = frame_b + (height - frame_b - frame_t) * j / 9.0
-        figure.add(Text(x=frame_l + 6, y=gy, content=letter, height=3.0, layer=LAYER_DIM),
-                   Text(x=width - frame_r - 8, y=gy, content=letter, height=3.0, layer=LAYER_DIM))
-        if j < 8:
-            figure.add(Line(x1=frame_l, y1=gy, x2=frame_l + 12, y2=gy, layer=LAYER_TEXT),
-                       Line(x1=width - frame_r, y1=gy, x2=width - frame_r - 12, y2=gy,
-                            layer=LAYER_TEXT))
-
-    ground = xy(x_min, 0.0)[1]
-    figure.add(Line(x1=draw_l - 4, y1=ground, x2=width - draw_r + 2, y2=ground, layer=LAYER_TEXT))
-    gx0 = draw_l - 4
-    while gx0 < width - draw_r + 2:
-        figure.add(Line(x1=gx0, y1=ground, x2=gx0 + 2.4, y2=ground - 2.4, layer=LAYER_THIN))
-        gx0 += 4.0
-
-    # 车身（原版素材）
-    asset = Path(__file__).resolve().parent / "assets" / "crane_body.png"
-    if asset.exists():
-        body_h = BODY_M * 160.0 / 388.0
-        figure.add(
-            DrawingImage(
-                x=xy(-BODY_M * 0.26, 0.0)[0],
-                y=xy(0.0, 0.0)[1],
-                w=BODY_M * scale,
-                h=body_h * scale,
-                path=str(asset),
-            )
+    rated = detail.get("lift_height")
+    if rated is not None and hook_h > float(rated) + 1e-6:
+        notes.append(
+            f"该格额定起升高度 {float(rated):.2f} m 小于图示要求 {hook_h:.2f} m，"
+            "需另行校核该工况起升高度"
         )
 
-    # 臂架铰点离地高度
-    pivot = (0.0, hinge_y)
-    rad = math.radians(angle)
-    tip = (boom * math.cos(rad), pivot[1] + boom * math.sin(rad))
+    model = ElevationModel(
+        boom_len=boom_len,
+        boom_angle=angle,
+        radius=radius,
+        hook_h=hook_h,
+        load_w=load_w,
+        load_h=load_h,
+    )
+    return model, notes
 
-    x_min, x_max = -12.0, max(tip[0], radius) + 10.0
-    y_min, y_max = -3.0, max(tip[1], lift) + 6.0
-    span_x, span_y = x_max - x_min, y_max - y_min
 
-    avail_x = width - draw_l - draw_r
-    avail_y = height - draw_b - draw_t
-    scale = min(avail_x / span_x, avail_y / span_y)
+class _Paper:
+    """模型坐标 (m) → 图面坐标 (mm)；x 取反（吊物在图左）。"""
 
-    def xy(x_m: float, y_m: float) -> tuple[float, float]:
-        return draw_l + (x_m - x_min) * scale, draw_b + (y_m - y_min) * scale
+    def __init__(self, scale: float, ox: float, oy: float) -> None:
+        self.s = scale
+        self.ox = ox
+        self.oy = oy
 
-    figure = Figure(title="吊装立面图", width=width, height=height,
-                    notes=["1:100", "A3"])
+    def __call__(self, x: float, y: float) -> tuple[float, float]:
+        return self.ox - x * self.s, self.oy + y * self.s
 
-    # 图框（外框 + 内框）
-    figure.add(Polyline(points=((0.5, 0.5), (width - 0.5, 0.5), (width - 0.5, height - 0.5),
-                                (0.5, height - 0.5)), closed=True, layer=LAYER_TEXT))
-    figure.add(Polyline(points=((frame_l, frame_b), (width - frame_r, frame_b),
-                                (width - frame_r, height - frame_t), (frame_l, height - frame_t)),
-                        closed=True, layer=LAYER_TEXT))
-    # 分区编号
-    for i in range(1, 9):
-        gx = frame_l + (width - frame_l - frame_r) * i / 9.0
-        figure.add(Text(x=gx, y=height - frame_t - 5.0, content=str(i), height=3.0, layer=LAYER_DIM))
-        if gx < width - frame_r - 185.0:
-            figure.add(Text(x=gx, y=frame_b + 2.0, content=str(i), height=3.0, layer=LAYER_DIM))
-        if i < 8:
-            figure.add(Line(x1=gx, y1=frame_b, x2=gx, y2=frame_b + 6, layer=LAYER_TEXT),
-                       Line(x1=gx, y1=height - frame_t, x2=gx, y2=height - frame_t - 6, layer=LAYER_TEXT))
-    for j, letter in enumerate("ABCDEFGH", start=1):
-        gy = frame_b + (height - frame_b - frame_t) * j / 9.0
-        figure.add(Text(x=frame_l + 6, y=gy, content=letter, height=3.0, layer=LAYER_DIM),
-                   Text(x=width - frame_r - 8, y=gy, content=letter, height=3.0, layer=LAYER_DIM))
-        if j < 8:
-            figure.add(Line(x1=frame_l, y1=gy, x2=frame_l + 12, y2=gy, layer=LAYER_TEXT),
-                       Line(x1=width - frame_r, y1=gy, x2=width - frame_r - 12, y2=gy,
-                            layer=LAYER_TEXT))
+    def dx(self, metres: float) -> float:
+        return metres * self.s
 
-    ground = xy(x_min, 0.0)[1]
-    figure.add(Line(x1=draw_l - 4, y1=ground, x2=width - draw_r + 2, y2=ground, layer=LAYER_TEXT))
-    gx0 = draw_l - 4
-    while gx0 < width - draw_r + 2:
-        figure.add(Line(x1=gx0, y1=ground, x2=gx0 + 2.4, y2=ground - 2.4, layer=LAYER_THIN))
-        gx0 += 4.0
+    def dy(self, metres: float) -> float:
+        return metres * self.s
 
-        # 车身（原版素材贴图）
+
+def _draw_body(figure: Figure, paper: _Paper, body: str = "image") -> None:
+    """body="image" 贴原版车身素材；"vector" 画矢量车身（DXF 用）。"""
+    if body == "vector":
+        draw_truck(figure, paper)
+        return
     asset = Path(__file__).resolve().parent / "assets" / "crane_body.png"
-    if asset.exists():
-        body_h = BODY_M * 160.0 / 388.0
-        figure.add(
-            DrawingImage(
-                x=xy(-BODY_M * 0.26, 0.0)[0],
-                y=xy(0.0, 0.0)[1],
-                w=BODY_M * scale,
-                h=body_h * scale,
-                path=str(asset),
-            )
-        )
+    if not asset.exists():
+        draw_truck(figure, paper)
+        return
+    body_h = BODY_LEN * BODY_RATIO
+    left = paper(BODY_REAR, 0.0)[0]                 # 车尾在图左
+    figure.add(
+        DrawingImage(x=left, y=paper.oy, w=BODY_LEN * paper.s, h=body_h * paper.s,
+                     path=str(asset))
+    )
 
-    # 臂架
-    nx, ny = -math.sin(rad), math.cos(rad)
-    half = 0.7
-    a = (pivot[0] + nx * half, pivot[1] + ny * half)
-    b = (pivot[0] - nx * half, pivot[1] - ny * half)
-    c = (tip[0] - nx * half, tip[1] - ny * half)
-    d = (tip[0] + nx * half, tip[1] + ny * half)
-    figure.add(Polyline(points=(xy(*a), xy(*d), xy(*c), xy(*b)), closed=True, layer=LAYER_TEXT))
-    for k in range(1, 7):
-        f = k / 7.0
-        p1 = (a[0] + (d[0] - a[0]) * f, a[1] + (d[1] - a[1]) * f)
-        p2 = (b[0] + (c[0] - b[0]) * f, b[1] + (c[1] - b[1]) * f)
-        figure.add(Line(x1=xy(*p1)[0], y1=xy(*p1)[1], x2=xy(*p2)[0], y2=xy(*p2)[1],
+
+def _boom_half(fraction: float) -> float:
+    return BOOM_HALF_FOOT + (BOOM_HALF_TIP - BOOM_HALF_FOOT) * fraction
+
+
+def _draw_boom(figure: Figure, paper: _Paper, model: ElevationModel) -> None:
+    rad = model.rad
+    ux, uy = math.cos(rad), math.sin(rad)           # 臂向（模型）
+    nx, ny = -uy, ux                                # 臂上侧法向（模型）
+    hx, hy = model.hinge
+    length = model.boom_len
+
+    def edge(fraction: float, side: float) -> tuple[float, float]:
+        half = _boom_half(fraction)
+        return (hx + ux * length * fraction + nx * half * side,
+                hy + uy * length * fraction + ny * half * side)
+
+    top = [edge(f, +1.0) for f in (0.0, 1.0)]
+    bottom = [edge(f, -1.0) for f in (0.0, 1.0)]
+    figure.add(
+        Polyline(points=tuple(paper(*p) for p in (top[0], top[1], bottom[1], bottom[0])),
+                 closed=True, layer=LAYER_OUTLINE)
+    )
+    # 伸缩节搭接线 + 节内棱线
+    for fraction in BOOM_JOINTS:
+        a = edge(fraction, +1.0)
+        b = edge(fraction, -1.0)
+        figure.add(Line(x1=paper(*a)[0], y1=paper(*a)[1],
+                        x2=paper(*b)[0], y2=paper(*b)[1], layer=LAYER_THIN))
+    # 变幅油缸：从转台到臂下侧 1/3 处
+    anchor = (hx + ux * length * 0.34 + nx * -_boom_half(0.34),
+              hy + uy * length * 0.34 + ny * -_boom_half(0.34))
+    cyl_base = (1.9, 2.8)
+    dx, dy = anchor[0] - cyl_base[0], anchor[1] - cyl_base[1]
+    norm = math.hypot(dx, dy) or 1.0
+    ox_, oy_ = -dy / norm * 0.16, dx / norm * 0.16
+    for side in (1.0, -1.0):
+        figure.add(
+            Line(x1=paper(cyl_base[0] + ox_ * side, cyl_base[1] + oy_ * side)[0],
+                 y1=paper(cyl_base[0] + ox_ * side, cyl_base[1] + oy_ * side)[1],
+                 x2=paper(anchor[0] + ox_ * side * 0.6, anchor[1] + oy_ * side * 0.6)[0],
+                 y2=paper(anchor[0] + ox_ * side * 0.6, anchor[1] + oy_ * side * 0.6)[1],
+                 layer=LAYER_THIN)
+        )
+    # 臂架铰点
+    figure.add(Circle(cx=paper(hx, hy)[0], cy=paper(hx, hy)[1],
+                      r=max(1.2, 0.32 * paper.s), layer=LAYER_OUTLINE))
+    # 臂端滑轮组
+    tip_x, tip_y = model.tip
+    for shift in (0.0, -0.95):
+        cx = tip_x + ux * shift
+        cy = tip_y + uy * shift
+        figure.add(Circle(cx=paper(cx, cy)[0], cy=paper(cx, cy)[1],
+                          r=SHEAVE_R * paper.s, layer=LAYER_OUTLINE))
+    # 臂头支架
+    bracket = [
+        (tip_x + ux * 0.35 + nx * 0.35, tip_y + uy * 0.35 + ny * 0.35),
+        (tip_x + ux * 0.35 - nx * 0.55, tip_y + uy * 0.35 - ny * 0.55),
+        (tip_x - ux * 1.5 - nx * 0.55, tip_y - uy * 1.5 - ny * 0.55),
+        (tip_x - ux * 1.5 + nx * 0.35, tip_y - uy * 1.5 + ny * 0.35),
+    ]
+    figure.add(Polyline(points=tuple(paper(*p) for p in bracket), closed=True,
                         layer=LAYER_THIN))
 
-    sheave = xy(*tip)
-    figure.add(Circle(cx=sheave[0], cy=sheave[1], r=max(1.8, 0.8 * scale), layer=LAYER_TEXT))
 
-    hook = xy(radius, lift)
+def _draw_hook_block(figure: Figure, paper: _Paper, model: ElevationModel) -> None:
+    x = model.radius
+    bottom = model.hook_h + BLOCK_GAP
+    top = bottom + BLOCK_H
+    half = BLOCK_W / 2.0
+    r = min(half * 0.9, 0.25)
 
-    # 起升绳：臂端滑轮 → 吊钩组（双股）
-    figure.add(Line(x1=sheave[0] - 2, y1=sheave[1], x2=xy(radius - 0.16, lift)[0],
-                    y2=hook[1], layer=LAYER_TEXT),
-               Line(x1=sheave[0] + 2, y1=sheave[1], x2=xy(radius + 0.16, lift)[0],
-                    y2=hook[1], layer=LAYER_TEXT))
-
-    # 吊钩组：竖长筒体（上下圆角）
-    hw_cyl, h_cyl = 0.52, 2.70
-    top_c = (radius, lift - hw_cyl)
-    bot_c = (radius, lift - h_cyl + hw_cyl)
-    cyl = []
-    for k in range(13):                      # 顶盖半圆：180° -> 0°
-        ang = math.radians(180 - 180 * k / 12)
-        cyl.append((top_c[0] + hw_cyl * math.cos(ang), top_c[1] + hw_cyl * math.sin(ang)))
-    for k in range(13):                      # 底盖半圆：0° -> -180°
-        ang = math.radians(-180 * k / 12)
-        cyl.append((bot_c[0] + hw_cyl * math.cos(ang), bot_c[1] + hw_cyl * math.sin(ang)))
-    figure.add(Polyline(points=tuple(xy(x, y) for x, y in cyl), closed=True, layer=LAYER_TEXT))
+    outline: list[tuple[float, float]] = [(x - half, bottom + r)]
+    for index in range(1, 9):                        # 左下圆角
+        ang = math.radians(180 + 90 * index / 8)
+        outline.append((x - half + r + r * math.cos(ang), bottom + r + r * math.sin(ang)))
+    outline.append((x + half - r, bottom))
+    for index in range(1, 9):                        # 右下圆角
+        ang = math.radians(270 + 90 * index / 8)
+        outline.append((x + half - r + r * math.cos(ang), bottom + r + r * math.sin(ang)))
+    outline.append((x + half, top - r))
+    for index in range(1, 9):                        # 右上圆角
+        ang = math.radians(0 + 90 * index / 8)
+        outline.append((x + half - r + r * math.cos(ang), top - r + r * math.sin(ang)))
+    outline.append((x - half + r, top))
+    for index in range(1, 9):                        # 左上圆角
+        ang = math.radians(90 + 90 * index / 8)
+        outline.append((x - half + r + r * math.cos(ang), top - r + r * math.sin(ang)))
+    figure.add(Polyline(points=tuple(paper(*p) for p in outline), closed=True,
+                        layer=LAYER_OUTLINE))
 
     # 筒内滑轮
-    sxp, syp = xy(radius, lift - 1.55)
-    figure.add(Circle(cx=sxp, cy=syp, r=max(0.8, 0.42 * scale), layer=LAYER_TEXT))
-
-    # 弯钩：从筒底向下的钩形（开口向左）
-    hx0, hy0 = radius, lift - h_cyl
-    hook_pts = [(hx0, hy0), (hx0, hy0 - 0.18)]
-    r_hk = 0.42
-    for k in range(19):
-        ang = math.radians(90 - 250.0 * k / 18.0)
-        hook_pts.append((hx0 + r_hk * math.cos(ang), hy0 - 0.18 + r_hk * math.sin(ang)))
-    hook_pts.append((hx0 - r_hk * 0.75, hy0 - 0.18 + r_hk * 0.55))
-    figure.add(Polyline(points=tuple(xy(x, y) for x, y in hook_pts), closed=False,
-                        layer=LAYER_TEXT))
-
-    # 吊物（挂在钩口下方）
-    sling_drop = 2.2
-    load_top = hy0 - 0.18 - r_hk - sling_drop
-    load_bottom = max(0.4, load_top - 3.8)
-    hw_l = 1.6
-    c1 = xy(radius - hw_l, load_top)
-    c2 = xy(radius + hw_l, load_top)
-    c3 = xy(radius + hw_l, load_bottom)
-    c4 = xy(radius - hw_l, load_bottom)
-    figure.add(Polyline(points=(c1, c2, c3, c4), closed=True, layer=LAYER_TEXT))
-    figure.add(Line(x1=c1[0], y1=c1[1], x2=c3[0], y2=c3[1], layer=LAYER_THIN),
-               Line(x1=c2[0], y1=c2[1], x2=c4[0], y2=c4[1], layer=LAYER_THIN))
-    hook_tip = xy(radius, hy0 - 0.18 - r_hk)
-    figure.add(Line(x1=hook_tip[0], y1=hook_tip[1], x2=c1[0], y2=c1[1], layer=LAYER_RIGGING),
-               Line(x1=hook_tip[0], y1=hook_tip[1], x2=c2[0], y2=c2[1], layer=LAYER_RIGGING))
-    figure.add(Text(x=xy(radius, 0.0)[0] - 5, y=xy(0.0, (load_top + load_bottom) / 2)[1] - 2,
-                    content="吊物", height=3.2))
-
-    # 补充标注
-    tip_y_m = pivot[1] + boom * math.sin(rad)
-    tip_dim_x = xy(radius + 8.0, 0.0)[0]
-    figure.add(Line(x1=sheave[0], y1=sheave[1], x2=tip_dim_x + 1.5, y2=sheave[1],
+    figure.add(Circle(cx=paper(x, top - 0.85)[0], cy=paper(x, top - 0.85)[1],
+                      r=0.28 * paper.s, layer=LAYER_OUTLINE))
+    # 筒底横梁
+    figure.add(Line(x1=paper(x - half, bottom + 0.18)[0], y1=paper(x - half, bottom + 0.18)[1],
+                    x2=paper(x + half, bottom + 0.18)[0], y2=paper(x + half, bottom + 0.18)[1],
                     layer=LAYER_THIN))
-    figure.add(Text(x=tip_dim_x - 3, y=sheave[1] + 2.0,
-                    content=f"{tip_y_m:.2f}", height=3.0, layer=LAYER_DIM))
 
-    sling_angle = math.degrees(math.atan2(1.6, 2.2))
-    figure.add(Text(x=hook[0] + 9, y=hook[1] - 5.0,
-                    content=f"{sling_angle:.0f}°", height=2.8, layer=LAYER_DIM))
-    figure.add(Text(x=hook[0] - 14, y=hook[1] + 3.5,
-                    content="吊钩中心", height=2.8, layer=LAYER_NOTE))
-    figure.add(Text(x=xy(0.0, 0.0)[0] - 18, y=ground + 4,
-                    content="旋转轴中心", height=2.8, layer=LAYER_NOTE))
+    # 吊钩：竖颈 + 240° 弯钩（开口朝图面吊物侧）
+    hook_r = 0.26
+    cx, cy = x - 0.26, model.hook_h + 0.10
+    points: list[tuple[float, float]] = [(x, bottom), (x, cy)]
+    for index in range(1, 25):
+        ang = math.radians(0 + 240 * index / 24)
+        points.append((cx + hook_r * math.cos(ang), cy + hook_r * math.sin(ang)))
+    figure.add(Polyline(points=tuple(paper(*p) for p in points), closed=False,
+                        layer=LAYER_OUTLINE))
 
-    # 起重性能表（右中）
-    rows = [
-        ("机型", str(cap.get("model") or "")),
-        ("臂长 L", f"{boom:.2f} m"),
-        ("幅度 R", f"{radius:g} m"),
-        ("仰角 a", f"{angle:.1f}°"),
-        ("起升高度 H", f"{lift:.2f} m"),
-        ("臂端高度", f"{tip_y_m:.2f} m"),
-        ("该格额定", f"{float(cap.get('rated_load') or 0):g} t"),
-        ("计算荷载", f"{float(cap.get('required') or 0):.2f} t"),
-        ("负荷率", f"{float(cap.get('utilization') or 0):.3f}"),
+
+def _draw_rope(figure: Figure, paper: _Paper, model: ElevationModel) -> None:
+    tip_x, tip_y = model.tip
+    block_top = model.block_top
+    for offset in (-0.22, 0.22):
+        a = paper(tip_x, tip_y)
+        b = paper(model.radius + offset, block_top)
+        figure.add(Line(x1=a[0], y1=a[1], x2=b[0], y2=b[1], layer=LAYER_OUTLINE))
+
+
+def _draw_load(figure: Figure, paper: _Paper, model: ElevationModel) -> None:
+    x = model.radius
+    half = model.load_w / 2.0
+    top, bottom = model.load_top, model.load_bottom
+
+    box = (paper(x - half, top), paper(x + half, top),
+           paper(x + half, bottom), paper(x - half, bottom))
+    figure.add(Polyline(points=box, closed=True, layer=LAYER_OUTLINE))
+    figure.add(Line(x1=box[0][0], y1=box[0][1], x2=box[2][0], y2=box[2][1],
+                    layer=LAYER_THIN),
+               Line(x1=box[1][0], y1=box[1][1], x2=box[3][0], y2=box[3][1],
+                    layer=LAYER_THIN))
+
+    # 吊索：吊钩中心 → 吊物两上角（粗红线）
+    hook = paper(x, model.hook_h)
+    for corner in ((x - half, top), (x + half, top)):
+        c = paper(*corner)
+        figure.add(Line(x1=hook[0], y1=hook[1], x2=c[0], y2=c[1], layer=LAYER_RIGGING))
+
+    center = paper(x, (top + bottom) / 2.0)
+    figure.add(Text(x=center[0], y=center[1] + 1.6, content="吊物", height=3.0,
+                    align=ALIGN_CENTER, layer=LAYER_TEXT))
+
+
+def _draw_dimensions(figure: Figure, paper: _Paper, model: ElevationModel,
+                     *, derived_angle: bool) -> None:
+    x_left = paper(model.radius + model.load_w / 2.0, 0.0)[0]   # 吊物远边（图左）
+    ground = paper.oy
+    hook_x, hook_y = paper(model.radius, model.hook_h)
+    tip_x, tip_y = paper(*model.tip)
+    load_bottom_y = paper(0.0, model.load_bottom)[1]
+    load_top_y = paper(0.0, model.load_top)[1]
+
+    hz_x = x_left + CHAIN_HZ
+    h_x = x_left + CHAIN_H
+    hx_x = x_left + CHAIN_H123
+
+    # Hz：地面 → 臂端滑轮中心
+    D.dashed(figure, (hz_x + 1.0, tip_y), (tip_x, tip_y), layer=LAYER_THIN)
+    D.v_dim(figure, ground, tip_y, hz_x,
+            f"Hz={model.tip_height:.2f}", ref_x=tip_x, side="left", ext_ends=("hi",))
+    # H：地面 → 吊钩中心
+    D.dashed(figure, (h_x + 1.0, hook_y), (hook_x, hook_y), layer=LAYER_THIN)
+    D.v_dim(figure, ground, hook_y, h_x,
+            f"H={model.hook_h:.2f}", ref_x=hook_x, side="left", ext_ends=("hi",))
+    # h1~h3：吊物底 / 吊物高 / 吊索高
+    D.v_dim(figure, ground, load_bottom_y, hx_x,
+            f"h1={model.load_bottom:.2f}", ref_x=x_left + 2.0, side="left",
+            ext_ends=("hi",))
+    D.v_dim(figure, load_bottom_y, load_top_y, hx_x,
+            f"h2={model.load_h:.2f}", ref_x=x_left + 2.0, side="left")
+    D.v_dim(figure, load_top_y, hook_y, hx_x,
+            f"h3={model.sling_drop:.2f}", ref_x=x_left + 2.0, side="left")
+    # h0：吊钩中心 → 臂端
+    h0_x = hook_x - 26.0
+    D.dashed(figure, (h0_x + 1.0, hook_y), (hook_x, hook_y), layer=LAYER_THIN)
+    D.dashed(figure, (h0_x + 1.0, tip_y), (tip_x, tip_y), layer=LAYER_THIN)
+    D.v_dim(figure, hook_y, tip_y, h0_x,
+            f"h0={model.tip_height - model.hook_h:.2f}", side="left")
+
+    # R / f / g：地面以下
+    axis_x = paper.ox
+    near_x = paper(model.radius - model.load_w / 2.0, 0.0)[0]
+    far_x = x_left
+    y_f = ground - 8.0
+    y_r = ground - 16.0
+    if model.radius - model.load_w / 2.0 > 0.05:
+        D.h_dim(figure, axis_x, near_x, y_f, f"f={model.radius - model.load_w / 2.0:.2f}",
+                ref_y=ground, above=True)
+    D.h_dim(figure, near_x, far_x, y_f, f"g={model.load_w:.2f}", ref_y=ground, above=True)
+    D.h_dim(figure, axis_x, hook_x, y_r, f"R={model.radius:.2f}", ref_y=ground, above=True)
+
+    # L：沿臂长
+    foot = paper(*model.hinge)
+    tip_pt = paper(*model.tip)
+    D.aligned_dim(figure, foot, tip_pt, -(_boom_half(0.5) * paper.s + 6.0),
+                  f"L={model.boom_len:.2f}", height=3.0)
+
+    # 仰角：文字放在弧外靠近地面的那一侧，避开臂架
+    arc_r = 13.0
+    D.angle_dim(figure, foot[0], foot[1], arc_r, 180.0 - model.boom_angle, 180.0,
+                ("≈" if derived_angle else "") + f"a={model.boom_angle:.1f}°",
+                text_xy=(foot[0] - arc_r - 3.0, foot[1] + 1.4))
+
+    # E：地面 → 臂架铰点
+    front_x = paper(-BODY_FRONT, 0.0)[0]
+    D.v_dim(figure, ground, foot[1], front_x + 4.0, f"E={HINGE_H:.2f}",
+            ref_x=front_x, side="right")
+
+
+def _draw_markers(figure: Figure, paper: _Paper, model: ElevationModel) -> None:
+    axis_x = paper.ox
+    ground = paper.oy
+    # 回转中心：点划线 + 标注
+    D.dash_dot(figure, (axis_x, ground - 7.0), (axis_x, ground + 1.0),
+               layer=LAYER_CENTER)
+    figure.add(Text(x=axis_x + 2.0, y=ground - 2.6, content="回转中心", height=2.4,
+                    layer=LAYER_NOTE))
+
+    hook_x, hook_y = paper(model.radius, model.hook_h)
+    # 吊钩中心：文字在钩左侧，引线指向吊钩组
+    D.leader(figure, (hook_x - 0.3, hook_y + BLOCK_GAP + BLOCK_H / 2),
+             (hook_x - 9.0, hook_y + 3.4), "吊钩中心", align=ALIGN_RIGHT)
+
+    # 主臂：文字在臂上侧，引线指向臂中段
+    mid = 0.55
+    rad = model.rad
+    mx = model.boom_len * mid * math.cos(rad) - math.sin(rad) * _boom_half(mid)
+    my = HINGE_H + model.boom_len * mid * math.sin(rad) + math.cos(rad) * _boom_half(mid)
+    target = paper(mx, my)
+    D.leader(figure, target, (target[0] - 12.0, target[1] + 6.0), "主臂",
+             align=ALIGN_RIGHT)
+
+    # 索具
+    sling_mid = paper(model.radius - model.load_w / 4.0,
+                      (model.hook_h + model.load_top) / 2.0)
+    D.leader(figure, sling_mid, (sling_mid[0] - 6.0, sling_mid[1] - 2.0), "索具",
+             align=ALIGN_RIGHT)
+
+
+def _geometry(model: ElevationModel, scale: float, derived_angle: bool,
+              body: str = "image") -> Figure:
+    """只画立面几何（不含图框/标题栏/表格），用于按实际外包框排版。"""
+    canvas = Figure(title="", width=0.0, height=0.0)
+    paper = _Paper(scale=scale, ox=0.0, oy=0.0)
+    _draw_body(canvas, paper, body)
+    _draw_boom(canvas, paper, model)
+    _draw_rope(canvas, paper, model)
+    _draw_hook_block(canvas, paper, model)
+    _draw_load(canvas, paper, model)
+    _draw_dimensions(canvas, paper, model, derived_angle=derived_angle)
+    _draw_markers(canvas, paper, model)
+    return canvas
+
+
+def _shift(items: list[Any], dx: float, dy: float) -> list[Any]:
+    from dataclasses import replace
+
+    shifted: list[Any] = []
+    for item in items:
+        if isinstance(item, Line):
+            shifted.append(replace(item, x1=item.x1 + dx, y1=item.y1 + dy,
+                                   x2=item.x2 + dx, y2=item.y2 + dy))
+        elif isinstance(item, Circle):
+            shifted.append(replace(item, cx=item.cx + dx, cy=item.cy + dy))
+        elif isinstance(item, Polyline):
+            shifted.append(replace(item, points=tuple((x + dx, y + dy) for x, y in item.points)))
+        elif isinstance(item, (Text, DrawingImage)):
+            shifted.append(replace(item, x=item.x + dx, y=item.y + dy))
+        else:  # pragma: no cover - 图元类型穷举
+            shifted.append(item)
+    return shifted
+
+
+def _items_overlap(items: list[Any], rect: S.Rect) -> bool:
+    """逐个图元判重叠（用实际外包框，不用整体包围盒）。"""
+    from liftcalc.drawing.primitives import item_bbox
+
+    for item in items:
+        box = item_bbox(item)
+        if box is not None and S.overlaps(box, rect):
+            return True
+    return False
+
+
+def _build_sheet_view(model: ElevationModel, model_notes: list[str],
+                      cap: dict[str, Any], detail: dict[str, Any],
+                      sheet: S.Sheet, orientation: str,
+                      body: str = "image") -> Figure | None:
+    """在给定图幅上排一次版并出图。"""
+    derived_angle = detail.get("boom_angle") is None
+
+    # ---- 版面：家具位置固定，几何按实际外包框选比例并居中 -----------------
+    x0, y0, x1, y1 = sheet.content
+    # 标题栏贴图框右下角、说明贴左下角（都以图框线为基准，不是分区带内侧）
+    _fx0, fy0, fx1, _fy1 = sheet.inner
+    title_rect = (fx1 - 150.0, fy0, fx1, fy0 + 36.0)
+    notes_rect = (x0, fy0, x0 + 108.0, fy0 + 36.0)
+    table_w = 84.0
+    table_rows = 11 if cap.get("mode") == "dual" else 10
+    table_h = 5.2 + 1.2 + 5.2 * table_rows
+    table_rect = (x1 - table_w, y1 - table_h, x1, y1)
+
+    area = (x0 + 1.0, y0 + 39.0, x1 - 1.0, y1 - 1.0)
+    area_w = area[2] - area[0]
+    area_h = area[3] - area[1]
+    # 允许尺寸线探入分区带 2 mm（工程图允许尺寸界线靠近图框），避免为半毫米跳一档比例
+    slack = 2.0
+
+    chosen = None
+    for denom_value in SCALE_LADDER:
+        scale = 1000.0 / denom_value
+        geometry = _geometry(model, scale, derived_angle, body)
+        bx0, by0, bx1, by1 = geometry.bbox()
+        width, height = bx1 - bx0, by1 - by0
+        if width > area_w + slack or height > area_h + slack:
+            continue
+        dx = area[0] + (area_w - width) / 2.0 - bx0
+        dy = area[1] + (area_h - height) / 2.0 - by0
+        rect = (bx0 + dx, by0 + dy, bx1 + dx, by1 + dy)
+        if _items_overlap(_shift(geometry.primitives, dx, dy), table_rect):
+            continue
+        chosen = (denom_value, scale, geometry, dx, dy, rect)
+        break
+    if chosen is None:                                   # 最大一档也放不下：取最小比例
+        denom_value = SCALE_LADDER[-1]
+        scale = 1000.0 / denom_value
+        geometry = _geometry(model, scale, derived_angle, body)
+        bx0, by0, bx1, by1 = geometry.bbox()
+        dx = area[0] - bx0
+        dy = area[1] - by0
+        chosen = (denom_value, scale, geometry, dx, dy,
+                  (bx0 + dx, by0 + dy, bx1 + dx, by1 + dy))
+
+    denom_value, scale, geometry, dx, dy, content_rect = chosen
+
+    figure = Figure(title="吊装立面图", width=sheet.width, height=sheet.height)
+    S.draw_frame(figure, sheet)
+    S.draw_zones(figure, sheet, [title_rect, notes_rect, table_rect])
+    S.draw_ground(figure, area[0], area[2], dy)   # 几何按 oy=0 建，平移 dy 后地面在 y=dy
+
+    geometry_start = len(figure.primitives)
+    figure.primitives.extend(_shift(geometry.primitives, dx, dy))
+    geometry_end = len(figure.primitives)
+
+    # ---- 性能表 ----------------------------------------------------------
+    rated_lift = detail.get("lift_height")
+    rows: list[tuple[str, str]] = [
+        ("机型", str(detail.get("model") or cap.get("model") or "")),
+        ("臂长 L", f"{model.boom_len:.2f} m"),
+        ("幅度 R", f"{model.radius:g} m"),
+        ("仰角 a", f"{model.boom_angle:.1f}°"),
+        ("图示吊钩高", f"{model.hook_h:.2f} m"),
+        ("额定起升高度", "—" if rated_lift is None else f"{float(rated_lift):.2f} m"),
+        ("该格额定", f"{float(detail.get('rated_load') or 0):g} t"),
+        ("计算荷载", f"{float(detail.get('required') or 0):.2f} t"),
+        ("负荷率", f"{float(detail.get('utilization') or 0):.3f}"),
+        ("负荷率上限", f"{float(cap.get('limit') or 0):.0%}"),
     ]
-    tbl_w, row_h = 74.0, 5.4
-    tbl_x = width - frame_r - tbl_w - 6
-    tbl_y = frame_b + 58
-    tbl_h = row_h * (len(rows) + 1)
-    figure.add(Polyline(points=((tbl_x, tbl_y), (tbl_x + tbl_w, tbl_y),
-                                (tbl_x + tbl_w, tbl_y + tbl_h), (tbl_x, tbl_y + tbl_h)),
-                        closed=True, layer=LAYER_TEXT))
-    figure.add(Text(x=tbl_x + 2, y=tbl_y + tbl_h - 4.2, content="起重性能（临界格）", height=3.0))
-    figure.add(Line(x1=tbl_x, y1=tbl_y + tbl_h - row_h, x2=tbl_x + tbl_w,
-                    y2=tbl_y + tbl_h - row_h, layer=LAYER_TEXT))
-    for i, (label, value) in enumerate(rows, start=1):
-        ry = tbl_y + tbl_h - row_h * (i + 1) + 1.5
-        figure.add(Text(x=tbl_x + 2, y=ry, content=label, height=2.6, layer=LAYER_NOTE),
-                   Text(x=tbl_x + 32, y=ry, content=value, height=2.6, layer=LAYER_TEXT))
-        if i < len(rows):
-            figure.add(Line(x1=tbl_x, y1=ry - 1.5, x2=tbl_x + tbl_w, y2=ry - 1.5,
-                            layer=LAYER_THIN))
+    if cap.get("mode") == "dual":
+        right = cap.get("right") or {}
+        rows.extend([
+            ("辅吊机型", str(right.get("model") or "")),
+            ("辅吊最远", f"{float(right.get('max_radius') or 0):g} m"),
+            ("辅吊负荷率", f"{float(right.get('utilization') or 0):.3f}"),
+        ])
+    S.perf_table(figure, table_rect[2], table_rect[3], rows, width=table_w)
 
-    # 标题栏（右下，含签署栏）
-    tb_w, tb_h = 132.0, 30.0
-    tb_x, tb_y = width - frame_r - tb_w - 6, frame_b + 2
-    figure.add(Polyline(points=((tb_x, tb_y), (tb_x + tb_w, tb_y), (tb_x + tb_w, tb_y + tb_h),
-                                (tb_x, tb_y + tb_h)), closed=True, layer=LAYER_TEXT))
-    r1, r2 = tb_y + 20.0, tb_y + 11.0
-    figure.add(Line(x1=tb_x, y1=r1, x2=tb_x + tb_w, y2=r1, layer=LAYER_TEXT),
-               Line(x1=tb_x, y1=r2, x2=tb_x + tb_w, y2=r2, layer=LAYER_TEXT))
-    for cx in (tb_x + 58.0, tb_x + 96.0):
-        figure.add(Line(x1=cx, y1=tb_y, x2=cx, y2=r1, layer=LAYER_TEXT))
-    figure.add(
-        Text(x=tb_x + 3, y=tb_y + 23.0,
-             content=f"吊装立面图  {cap.get('model') or ''}", height=4.0),
-        Text(x=tb_x + 3, y=tb_y + 13.0, content="工程名称", height=2.8, layer=LAYER_NOTE),
-        Text(x=tb_x + 61, y=tb_y + 13.0, content="图号 LC-01", height=2.8),
-        Text(x=tb_x + 99, y=tb_y + 13.0, content="比例 1:100", height=2.8),
-        Text(x=tb_x + 3, y=tb_y + 4.0, content="设计", height=2.8, layer=LAYER_NOTE),
-        Text(x=tb_x + 40, y=tb_y + 4.0, content="校核", height=2.8, layer=LAYER_NOTE),
-        Text(x=tb_x + 61, y=tb_y + 4.0, content="审核", height=2.8, layer=LAYER_NOTE),
-        Text(x=tb_x + 99, y=tb_y + 4.0, content="批准", height=2.8, layer=LAYER_NOTE),
+    # ---- 说明 ------------------------------------------------------------
+    notes = [
+        f"比例 1:{denom_value}（A3 竖幅）。尺寸单位 m。",
+        "幅度 R 量至吊钩中心；额定起重量取自原厂性能表，按说明第 7 条取下一档，不插值。",
+        f"计算荷载已含吊件、吊钩与索具，负荷率上限 {float(cap.get('limit') or 0):.0%}。",
+        f"图示吊物 {model.load_w:g} m × {model.load_h:g} m、净空 "
+        f"{max(model.load_bottom, 0.0):.2f} m 为示意，不代表实际吊件外形。",
+        "本图为能力反查示意，不作为施工依据。",
+    ]
+    notes.extend(model_notes)
+    if cap.get("mode") == "dual":
+        notes.append("双机抬吊：图示按主吊工况绘制，辅吊工况见性能表。")
+    notes_rect_used = S.notes_block(
+        figure, notes_rect[0], notes_rect[3], notes_rect[2] - notes_rect[0] - 2.0, notes
     )
+
+    S.title_block(
+        figure, sheet,
+        title="吊装立面图",
+        subtitle=str(detail.get("model") or cap.get("model") or ""),
+        scale_text=f"1:{denom_value}",
+        drawing_no="LC-01",
+        project="吊装能力反查",
+        date="",
+    )
+
+    figure.meta = {
+        "orientation": orientation,
+        "scale_denom": denom_value,
+        "scale": scale,
+        "paper": (sheet.width, sheet.height),
+        "content_rect": content_rect,
+        "geometry_span": (geometry_start, geometry_end),
+        "reserved": [title_rect, notes_rect_used, table_rect],
+        "derived_angle": derived_angle,
+        "hook_h": model.hook_h,
+        "load_bottom": model.load_bottom,
+        "model": model,
+    }
     return figure
+
+
+def elevation_figure(result: ComputationResult, *, body: str = "image") -> Figure | None:
+    """吊装立面图：自动选图幅方向（竖幅/横幅）与标准比例，再排图框、标题栏、
+    性能表、说明、尺寸链与引线。"""
+    cap = result.aux.get("capability") or {}
+    detail = _capability_detail(cap)
+    if detail is None:
+        return None
+    model, model_notes = _elevation_model(cap, detail, result.aux.get("load") or {})
+
+    candidates: list[Figure] = []
+    for width, height, name in ((297.0, 420.0, "portrait"), (420.0, 297.0, "landscape")):
+        view = _build_sheet_view(model, model_notes, cap, detail,
+                                 S.Sheet(width=width, height=height), name, body)
+        if view is not None:
+            candidates.append(view)
+    if not candidates:
+        return None
+    # 比例更大者优先（1:n 的 n 更小），同比例时竖幅优先
+    return min(candidates, key=lambda f: (f.meta["scale_denom"],
+                                         0 if f.meta["orientation"] == "portrait" else 1))
 
 
 def figure_for(result: ComputationResult) -> Figure | None:
@@ -495,11 +798,14 @@ def figure_for(result: ComputationResult) -> Figure | None:
     )
 
 
-def figures_for(result: ComputationResult) -> list[Figure]:
-    """一次产出该结果支持的全部图（能力曲线 + 立面）。"""
+def figures_for(result: ComputationResult, *, body: str = "image") -> list[Figure]:
+    """一次产出该结果支持的全部图（能力曲线 + 立面）。body 见 elevation_figure。"""
     figures: list[Figure] = []
-    for builder in (capability_figure, elevation_figure, eye_figure, section_figure):
+    for builder in (capability_figure, eye_figure, section_figure):
         figure = builder(result)
         if figure is not None:
             figures.append(figure)
+    elevation = elevation_figure(result, body=body)
+    if elevation is not None:
+        figures.insert(1 if figures else 0, elevation)
     return figures

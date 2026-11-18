@@ -42,8 +42,15 @@ warn_unused_ignores = true
 ignore_missing_imports = true
 
 [tool.ruff]
-line-length = 110
+line-length = 120
 target-version = "py312"
+# tools/ 是转录、PDF 提取、一次性迁移脚本，不参与代码规范
+extend-exclude = ["tools"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "SIM", "RUF", "UP"]
+ignore = [
+  "RUF001", "RUF002", "RUF003",  # 中文标点（，。：（））被当成歧义字符，本项目全中文，必然误报
+  "B008",                          # typer.Option/Argument 必须写在默认值里
+  "RUF046",                        # int() 包裹已是 int 的值，可读性偏好
+]

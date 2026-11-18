@@ -106,13 +106,14 @@ def draw(
 ) -> None:
     """由 result.json 生成简图。"""
     result = ComputationResult.model_validate(_load_json(result_path))
-    figures = figures_for(result)
-    if not figures:
-        typer.echo("该结果没有可用图形", err=True)
-        raise typer.Exit(2)
     fmt = fmt.lower()
     if fmt not in {"svg", "dxf"}:
         typer.echo(f"不支持的格式：{fmt}", err=True)
+        raise typer.Exit(2)
+    # DXF 不支持位图块，车身改画矢量简图；SVG 贴原版车身素材
+    figures = figures_for(result, body="vector" if fmt == "dxf" else "image")
+    if not figures:
+        typer.echo("该结果没有可用图形", err=True)
         raise typer.Exit(2)
     out.parent.mkdir(parents=True, exist_ok=True)
     for index, figure in enumerate(figures, start=1):
@@ -197,6 +198,9 @@ def capability_cmd(
     left_share: float = typer.Option(0.6, "--left-share", help="主吊承担比例"),
     asynchronism: float = typer.Option(1.0, "--asynchronism", help="不同步系数"),
     required_height: float | None = typer.Option(None, "--required-height", help="所需起升高度 m"),
+    load_width: float = typer.Option(3.2, "--load-width", help="图示吊物宽 m（只影响立面图）"),
+    load_height: float = typer.Option(3.8, "--load-height", help="图示吊物高 m（只影响立面图）"),
+    clearance: float = typer.Option(1.0, "--clearance", help="图示吊物底距地净空 m（只影响立面图）"),
     limit: float | None = typer.Option(None, "--limit", help="负荷率上限（默认单机 0.9 / 双机 0.8）"),
     out: Path | None = typer.Option(None, "--out", "-o"),
     db: Path = typer.Option(Path("data/liftcalc.sqlite"), "--db"),
@@ -212,6 +216,9 @@ def capability_cmd(
         "crane": {"brand": brand, "model": model},
         "left_share": left_share,
         "asynchronism": asynchronism,
+        "load_width_m": load_width,
+        "load_height_m": load_height,
+        "clearance_m": clearance,
     }
     if limit is not None:
         case["limit"] = limit
@@ -234,15 +241,17 @@ def render_png_cmd(
     out_dir: Path = typer.Option(..., "--out", "-o", help="输出目录"),
 ) -> None:
     """把结果渲染成 PNG（无 CAD 时看图用）。"""
-    import subprocess
-    import sys as _sys
+    from liftcalc.drawing.png import to_png
 
-    root = Path(__file__).resolve().parents[3]
-    script = root / "tools" / "render_png.py"
-    if not script.exists():
-        typer.echo(f"未找到渲染脚本：{script}", err=True)
+    result = ComputationResult.model_validate(_load_json(result_path))
+    figures = figures_for(result)
+    if not figures:
+        typer.echo("该结果没有可用图形", err=True)
         raise typer.Exit(2)
-    _sys.exit(subprocess.call([_sys.executable, str(script), str(result_path), str(out_dir)]))
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for index, figure in enumerate(figures, start=1):
+        target = to_png(figure, out_dir / f"{result_path.stem}-{index}.png")
+        typer.echo(f"已写入 {target}（{figure.title}）")
 
 
 @app.command("schema")

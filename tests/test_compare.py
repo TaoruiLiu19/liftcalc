@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from liftcalc.core.result import ComputationResult, CheckResult, Verdict
+from liftcalc.core.result import CheckResult, ComputationResult, Verdict
 from liftcalc.services.calc import run_case
 from liftcalc.services.compare import GRADE_BLOCKING, GRADE_PASS, GRADE_UNMATCHED, compare
 

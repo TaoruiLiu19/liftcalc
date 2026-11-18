@@ -14,10 +14,10 @@ from liftcalc.core.errors import DataError, InputError, LiftcalcError, UnknownKi
 from liftcalc.core.result import CheckResult, ComputationResult, Verdict, summarize
 from liftcalc.core.units import Q, to_quantity
 from liftcalc.core.version import digest, engine_version
-from liftcalc.data.repo import Repo
 from liftcalc.crane import capability as crane_capability
 from liftcalc.crane import select as crane_select
 from liftcalc.crane.select import OutriggerLayout
+from liftcalc.data.repo import Repo
 from liftcalc.fea import frame2d
 from liftcalc.geometry import solids as solid_lib
 from liftcalc.geometry.centroid import AssemblyItem, assembly_centroid
@@ -33,12 +33,26 @@ from liftcalc.sections import custom
 from liftcalc.sections.models import SectionProps
 from liftcalc.sections.outline import (
     angle_section as outline_angle,
+)
+from liftcalc.sections.outline import (
     annulus as outline_annulus,
+)
+from liftcalc.sections.outline import (
     box as outline_box,
+)
+from liftcalc.sections.outline import (
     channel as outline_channel,
+)
+from liftcalc.sections.outline import (
     circle as outline_circle,
+)
+from liftcalc.sections.outline import (
     i_section as outline_i,
+)
+from liftcalc.sections.outline import (
     rect as outline_rect,
+)
+from liftcalc.sections.outline import (
     t_section as outline_t,
 )
 from liftcalc.sections.steel import get_section
@@ -823,7 +837,15 @@ def _capability_case(case: CapabilityCase, repo: Repo | None) -> ComputationResu
         return [[p.boom_len, p.radius, p.rated_load] for p in points]
 
     checks: list[CheckResult] = []
-    aux: dict[str, Any] = {"figure": "capability", "mode": case.mode}
+    aux: dict[str, Any] = {
+        "figure": "capability",
+        "mode": case.mode,
+        "load": {
+            "width": case.load_width_m,
+            "height": case.load_height_m,
+            "clearance": case.clearance_m,
+        },
+    }
     warnings: list[str] = []
     if hook_from_db:
         warnings.append(
