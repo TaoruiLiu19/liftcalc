@@ -228,6 +228,23 @@ def capability_cmd(
     if result.verdict is Verdict.FAIL:
         raise typer.Exit(1)
 
+@app.command("render")
+def render_png_cmd(
+    result_path: Path = typer.Option(..., "--in", "-i", help="结果 JSON"),
+    out_dir: Path = typer.Option(..., "--out", "-o", help="输出目录"),
+) -> None:
+    """把结果渲染成 PNG（无 CAD 时看图用）。"""
+    import subprocess
+    import sys as _sys
+
+    root = Path(__file__).resolve().parents[3]
+    script = root / "tools" / "render_png.py"
+    if not script.exists():
+        typer.echo(f"未找到渲染脚本：{script}", err=True)
+        raise typer.Exit(2)
+    _sys.exit(subprocess.call([_sys.executable, str(script), str(result_path), str(out_dir)]))
+
+
 @app.command("schema")
 def schema(
     out: Path = typer.Option(Path("schemas"), "--out", help="输出目录"),
