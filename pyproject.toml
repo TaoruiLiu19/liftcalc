@@ -27,7 +27,7 @@ liftcalc = "liftcalc.cli.main:app"
 where = ["src"]
 
 [tool.setuptools.package-data]
-liftcalc = ["data/schema.sql", "data/pack/*.csv", "data/pack/*.yaml"]
+liftcalc = ["data/schema.sql", "data/pack/*.csv", "data/pack/*.yaml", "data/pack/crane/*.csv"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

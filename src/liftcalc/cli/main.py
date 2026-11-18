@@ -111,7 +111,7 @@ def draw(
         typer.echo(f"不支持的格式：{fmt}", err=True)
         raise typer.Exit(2)
     # DXF 不支持位图块，车身改画矢量简图；SVG 贴原版车身素材
-    figures = figures_for(result, body="vector" if fmt == "dxf" else "image")
+    figures = figures_for(result)
     if not figures:
         typer.echo("该结果没有可用图形", err=True)
         raise typer.Exit(2)
