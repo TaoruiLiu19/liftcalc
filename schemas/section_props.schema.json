@@ -1,0 +1,271 @@
+{
+  "$defs": {
+    "CaseMeta": {
+      "additionalProperties": false,
+      "properties": {
+        "project": {
+          "default": "",
+          "title": "Project",
+          "type": "string"
+        },
+        "part": {
+          "default": "",
+          "title": "Part",
+          "type": "string"
+        },
+        "author": {
+          "default": "",
+          "title": "Author",
+          "type": "string"
+        },
+        "date": {
+          "default": "",
+          "title": "Date",
+          "type": "string"
+        },
+        "notes": {
+          "default": "",
+          "title": "Notes",
+          "type": "string"
+        }
+      },
+      "title": "CaseMeta",
+      "type": "object"
+    },
+    "SectionSpec": {
+      "additionalProperties": false,
+      "description": "截面定义；按 type 取用相应字段。",
+      "properties": {
+        "type": {
+          "enum": [
+            "steel",
+            "rect",
+            "box",
+            "round",
+            "pipe",
+            "ishape",
+            "channel",
+            "t",
+            "angle"
+          ],
+          "title": "Type",
+          "type": "string"
+        },
+        "family": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Family"
+        },
+        "designation": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Designation"
+        },
+        "b": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "B"
+        },
+        "h": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "H"
+        },
+        "t": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "T"
+        },
+        "tw": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tw"
+        },
+        "tf": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tf"
+        },
+        "d_outer": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "D Outer"
+        },
+        "d_inner": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "D Inner"
+        },
+        "b_long": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "B Long"
+        },
+        "b_short": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "B Short"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "SectionSpec",
+      "type": "object"
+    },
+    "Units": {
+      "additionalProperties": false,
+      "properties": {
+        "length": {
+          "default": "mm",
+          "enum": [
+            "mm",
+            "cm",
+            "m"
+          ],
+          "title": "Length",
+          "type": "string"
+        },
+        "force": {
+          "default": "kN",
+          "enum": [
+            "N",
+            "kN",
+            "t"
+          ],
+          "title": "Force",
+          "type": "string"
+        },
+        "stress": {
+          "default": "MPa",
+          "enum": [
+            "MPa",
+            "Pa"
+          ],
+          "title": "Stress",
+          "type": "string"
+        },
+        "mass": {
+          "default": "kg",
+          "enum": [
+            "kg",
+            "t"
+          ],
+          "title": "Mass",
+          "type": "string"
+        },
+        "angle": {
+          "default": "deg",
+          "enum": [
+            "deg",
+            "rad"
+          ],
+          "title": "Angle",
+          "type": "string"
+        }
+      },
+      "title": "Units",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "kind": {
+      "const": "section.props",
+      "title": "Kind",
+      "type": "string"
+    },
+    "units": {
+      "$ref": "#/$defs/Units"
+    },
+    "meta": {
+      "$ref": "#/$defs/CaseMeta"
+    },
+    "section": {
+      "$ref": "#/$defs/SectionSpec"
+    }
+  },
+  "required": [
+    "kind",
+    "section"
+  ],
+  "title": "SectionCase",
+  "type": "object"
+}

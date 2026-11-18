@@ -1,0 +1,249 @@
+# 公式登记表（设计 §9）
+# 说明：力学形式已确定；条文号与限值系数一律标 TBD，须对着规范原文核定后回填。
+# 不允许凭推测填写条文号——错误引用比没有引用更危险。
+
+- id: sec.rect_I
+  title: 矩形截面惯性矩
+  expression: "I = b · h³ / 12"
+  symbols:
+    b: {name: 宽度, unit: mm}
+    h: {name: 高度, unit: mm}
+    I: {name: 惯性矩, unit: mm⁴}
+  source: "材料力学（解析式）"
+  applies: "实心矩形，绕形心轴"
+
+- id: sec.tube_I
+  title: 圆管惯性矩
+  expression: "I = π (D⁴ − d⁴) / 64"
+  symbols:
+    D: {name: 外径, unit: mm}
+    d: {name: 内径, unit: mm}
+  source: "材料力学（解析式）"
+  applies: "同心圆管，绕形心轴"
+
+- id: sec.parallel_axis
+  title: 平行轴定理
+  expression: "I = I₀ + A · d²"
+  symbols:
+    I0: {name: 自身形心惯性矩, unit: mm⁴}
+    A: {name: 面积, unit: mm²}
+    d: {name: 形心间距, unit: mm}
+  source: "材料力学（解析式）"
+
+- id: sec.composite_centroid
+  title: 组合截面形心
+  expression: "ȳ = Σ(Aᵢ · yᵢ) / ΣAᵢ"
+  source: "材料力学（解析式）"
+
+- id: sec.W
+  title: 截面模量
+  expression: "W = I / y_max"
+  source: "材料力学（解析式）"
+
+- id: sec.radius_gyr
+  title: 回转半径
+  expression: "i = √(I / A)"
+  source: "材料力学（解析式）"
+
+- id: sec.polygon_green
+  title: 多边形截面特性（格林公式）
+  expression: "A = ½ ∮ (x dy − y dx)"
+  source: "计算几何（精确积分）"
+  applies: "任意简单多边形；不自交"
+  notes: "内部积分精度为机器精度，非网格近似"
+
+- id: geo.pappus
+  title: 回转体体积（Pappus 定理）
+  expression: "V = θ · R̄ · A"
+  symbols:
+    θ: {name: 回转角, unit: rad}
+    R: {name: 形心回转半径, unit: mm}
+    A: {name: 母线面积, unit: mm²}
+  source: "立体几何（解析式）"
+
+- id: geo.ellipsoid_head
+  title: 2:1 椭圆封头体积与形心
+  expression: "V = πD³/24 ;  z̄ = 3D/32"
+  source: "立体几何（解析式）"
+  applies: "标准 2:1 椭圆封头，不含直边段"
+
+- id: geo.spherical_cap
+  title: 球缺体积与形心
+  expression: "V = πh²(3R − h)/3 ;  z̄ = h(4R − h) / [4(3R − h)]"
+  source: "立体几何（解析式）"
+
+- id: geo.cone_frustum
+  title: 圆台体积与形心
+  expression: "V = πh(R₁² + R₁R₂ + R₂²)/3"
+  source: "立体几何（解析式）"
+
+- id: geo.elbow
+  title: 弯管体积与形心
+  expression: "V = A · R · θ ; 形心距弯头中心 R"
+  source: "立体几何（解析式）"
+
+- id: eye.hole_bearing
+  title: 耳板孔壁承压应力
+  expression: "σ_c = N / (d · t)"
+  symbols:
+    N: {name: 计算荷载, unit: kN}
+    d: {name: 销孔直径, unit: mm}
+    t: {name: 耳板厚度, unit: mm}
+    σ_c: {name: 孔壁承压应力, unit: MPa}
+  source: "GB 50017-2017（条文号 TBD-核定）"
+  applies: "销轴与孔壁接触承压，假定沿承压面均匀分布"
+  limit_ref: "TBD-核定（承压强度设计值）"
+  notes: "孔壁间隙较大时应考虑不均匀系数"
+
+- id: eye.net_tension
+  title: 耳板净截面抗拉应力
+  expression: "σ = N / A_net ,  A_net = (b − d) · t"
+  source: "GB 50017-2017（条文号 TBD-核定）"
+  applies: "垂直于受力方向的净截面"
+  limit_ref: "TBD-核定（抗拉强度设计值）"
+
+- id: eye.end_shear
+  title: 耳板端部抗剪（撕裂）
+  expression: "τ = N / (2 · e · t)"
+  symbols:
+    e: {name: 孔中心至板端距离, unit: mm}
+  source: "GB 50017-2017（条文号 TBD-核定）"
+  applies: "孔中心到板端的两个剪切面"
+  limit_ref: "TBD-核定（抗剪强度设计值）"
+
+- id: eye.fillet_weld
+  title: 角焊缝有效应力
+  expression: "τ_f = N / (0.7 · h_f · l_w)"
+  source: "GB 50017-2017（条文号 TBD-核定）"
+  applies: "双面角焊缝，有效厚度取 0.7 倍焊脚"
+  limit_ref: "TBD-核定（角焊缝强度设计值）"
+
+- id: pin.shear
+  title: 销轴抗剪应力
+  expression: "τ = N / (π d² / 4)"
+  source: "材料力学（解析式）"
+  applies: "双剪时按单剪面计，荷载取一半"
+
+- id: pin.bending
+  title: 销轴抗弯应力
+  expression: "σ = M / W ,  M = N · t / 4 ,  W = π d³ / 32"
+  source: "材料力学（解析式）"
+  applies: "按两端支承、跨中受集中力的简支梁近似"
+  notes: "支承跨距取耳板厚度 t，属偏保守近似"
+
+- id: beam.M_simple_udl
+  title: 简支梁均布荷载弯矩
+  expression: "M = q · l² / 8"
+  source: "结构力学（解析式）"
+
+- id: beam.f_simple_udl
+  title: 简支梁均布荷载挠度
+  expression: "f = 5 q l⁴ / (384 E I)"
+  source: "结构力学（解析式）"
+
+- id: beam.sigma
+  title: 梁弯曲正应力
+  expression: "σ = M / W"
+  source: "材料力学（解析式）"
+
+- id: beam.tau
+  title: 梁弯曲剪应力
+  expression: "τ = V · S / (I · t_w)"
+  source: "材料力学（解析式）"
+
+- id: rigging.rope_break
+  title: 钢丝绳最小破断拉力
+  expression: "F₀ = K′ · d² · R₀"
+  symbols:
+    K: {name: 捻制系数 K′, unit: ""}
+    d: {name: 钢丝绳公称直径, unit: mm}
+    R0: {name: 公称抗拉强度, unit: MPa}
+  source: "GB/T 8918-2006（条文号与 K′ 取值 TBD-核定）"
+  applies: "6×19、6×37 等常见结构；K′ 随结构不同"
+
+- id: rigging.branch
+  title: 多分支吊索单支受力
+  expression: "T = N / (n · cos α)"
+  symbols:
+    n: {name: 分支数, unit: ""}
+    α: {name: 分支与竖直方向夹角, unit: deg}
+  source: "静力平衡（解析式）"
+  applies: "各分支对称布置；非对称时应按力法分配"
+
+- id: crane.capability
+  title: 能力反查（给定吊重求最远幅度）
+  expression: "η(r) = (G + g_h + g_r·k) / R(r) ≤ η_lim，取满足条件且幅度 r 最大的格点"
+  symbols:
+    G: {name: 吊件重量, unit: t}
+    g_hook: {name: 吊钩重量, unit: t}
+    g_rig: {name: 索具重量, unit: t}
+    k: {name: 动载系数, unit: ""}
+    R: {name: 该格额定起重量, unit: t}
+    eta_lim: {name: 负荷率上限（单机0.9/双机0.8）, unit: ""}
+  source: "原厂起重性能表（查表取档，不插值）"
+- id: crane.load_ratio
+  title: 吊装负荷率
+  expression: "η = (G + g · k) / R"
+  symbols:
+    G: {name: 吊件重量, unit: t}
+    g: {name: 索具重量, unit: t}
+    k: {name: 动载系数, unit: ""}
+    R: {name: 额定起重量, unit: t}
+  source: "GB 50798-2012（条文号 TBD-核定）"
+
+- id: crane.lookup
+  title: 原厂性能表查表（取下一档）
+  expression: "按臂长与幅度向上取到表中相邻档，直接取该格额定值"
+  source: "原厂性能表说明第 7 条：臂长与幅度与表不符时，取下一个臂长与幅度作业"
+  applies: "严禁插值、严禁外推"
+  notes: "超出表范围一律报错"
+
+- id: fea.frame_k
+  title: 平面框架单元刚度矩阵（6×6）
+  expression: "k = [EA/L, 12EI/L³, 6EI/L², 4EI/L, 2EI/L]"
+  source: "结构力学（有限元标准式）"
+  applies: "等截面直杆，忽略剪切变形"
+
+- id: beam.M_simple_point
+  title: 简支梁跨中集中力弯矩
+  expression: "M = P · l / 4"
+  source: "结构力学（解析式）"
+
+- id: beam.f_simple_point
+  title: 简支梁跨中集中力挠度
+  expression: "f = P l³ / (48 E I)"
+  source: "结构力学（解析式）"
+
+- id: beam.M_cantilever_udl
+  title: 悬臂梁均布荷载弯矩
+  expression: "M = q · l² / 2"
+  source: "结构力学（解析式）"
+
+- id: beam.f_cantilever_udl
+  title: 悬臂梁均布荷载挠度
+  expression: "f = q l⁴ / (8 E I)"
+  source: "结构力学（解析式）"
+
+- id: beam.M_cantilever_point
+  title: 悬臂梁端部集中力弯矩
+  expression: "M = P · l"
+  source: "结构力学（解析式）"
+
+- id: beam.f_cantilever_point
+  title: 悬臂梁端部集中力挠度
+  expression: "f = P l³ / (3 E I)"
+  source: "结构力学（解析式）"
+
+- id: crane.outrigger
+  title: 四点支承支腿反力
+  expression: "R = W/4 · (1 ± 2eₓ/Lₓ) · (1 ± 2e_y/L_y)"
+  source: "刚性平台静力平衡（解析式）"
+  applies: "四个支腿矩形布置、支承平台视为刚体"
+  notes: "地基不均匀或支腿刚度差异大时需按弹性支承另算"
+
+- id: crane.ground_pressure
+  title: 接地比压
+  expression: "p = R / A"
+  source: "静力计算"
+  applies: "A 为路基板面积；需与地基承载力特征值比较"
+

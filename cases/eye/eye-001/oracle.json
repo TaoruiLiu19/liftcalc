@@ -1,0 +1,16 @@
+{
+  "_说明": "在原程序中按 case.json 的输入录入，把界面显示的结果抄到这里。value / limit 用界面单位（通常 MPa）。",
+  "source": "吊装助理 v1.1.3.8",
+  "captured_at": "",
+  "operator": "",
+  "screenshot": "eye-001.png",
+  "checks": [
+    { "title": "孔壁承压", "value": null, "unit": "MPa", "limit": null, "verdict": null },
+    { "title": "净截面抗拉", "value": null, "unit": "MPa", "limit": null, "verdict": null },
+    { "title": "端部抗剪", "value": null, "unit": "MPa", "limit": null, "verdict": null },
+    { "title": "角焊缝", "value": null, "unit": "MPa", "limit": null, "verdict": null },
+    { "title": "销轴抗剪", "value": null, "unit": "MPa", "limit": null, "verdict": null },
+    { "title": "销轴抗弯", "value": null, "unit": "MPa", "limit": null, "verdict": null }
+  ],
+  "notes": "标题必须与本系统 check 的 title 完全一致，否则会被标记 UNMATCHED"
+}

@@ -1,0 +1,5 @@
+model,brand,tonnage_class_t,crane_type,counterweight_t,hook_main_t,hook_aux_t,max_outrigger_reaction_kN,self_weight_t,source_doc,source_page,outrigger_lx_m,outrigger_ly_m
+QY70K-1,徐工,70,truck,4.0,0.616,0.370,625.0,,徐工70~500吨汽车吊参数表.pdf,1,7.30,6.10
+QY100H-3,徐工,100,truck,,,,,54.0,徐工70~500吨汽车吊参数表.pdf,2,6.74,7.80
+QY130H-1,徐工,130,truck,30,,,,69.0,徐工70~500吨汽车吊参数表.pdf,4,7.04,8.50
+QAY200,徐工,200,all_terrain,,2.41,1.586,,,徐工70~500吨汽车吊参数表.pdf,7,9.625,8.7

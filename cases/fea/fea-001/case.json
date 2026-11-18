@@ -1,0 +1,23 @@
+{
+  "kind": "fea.frame2d",
+  "units": { "length": "mm", "force": "N", "stress": "MPa" },
+  "meta": { "project": "示例工程", "part": "简支梁 4m（有限元）" },
+  "nodes": [
+    { "x": 0, "y": 0 },
+    { "x": 1000, "y": 0 },
+    { "x": 2000, "y": 0 },
+    { "x": 3000, "y": 0 },
+    { "x": 4000, "y": 0 }
+  ],
+  "elements": [
+    { "i": 0, "j": 1, "area": 11700, "inertia": 199327500, "udl": 10 },
+    { "i": 1, "j": 2, "area": 11700, "inertia": 199327500, "udl": 10 },
+    { "i": 2, "j": 3, "area": 11700, "inertia": 199327500, "udl": 10 },
+    { "i": 3, "j": 4, "area": 11700, "inertia": 199327500, "udl": 10 }
+  ],
+  "supports": [
+    { "node": 0, "fix_ux": true, "fix_uy": true },
+    { "node": 4, "fix_uy": true }
+  ],
+  "loads": []
+}

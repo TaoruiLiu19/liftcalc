@@ -1,0 +1,13 @@
+{
+  "kind": "lifting_rigging.check",
+  "units": { "length": "mm", "force": "kN" },
+  "meta": { "project": "示例工程", "part": "四点吊装索具" },
+  "load": { "total": 682 },
+  "sling": { "branches": 4, "angle_deg": 45 },
+  "rope": { "diameter": 48, "rated_strength": 1770, "k_prime": 0.356, "safety_factor": 6 },
+  "shackles": [
+    { "name": "25t", "capacity": 25 },
+    { "name": "35t", "capacity": 35 },
+    { "name": "50t", "capacity": 50 }
+  ]
+}

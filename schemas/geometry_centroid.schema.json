@@ -1,0 +1,184 @@
+{
+  "$defs": {
+    "CaseMeta": {
+      "additionalProperties": false,
+      "properties": {
+        "project": {
+          "default": "",
+          "title": "Project",
+          "type": "string"
+        },
+        "part": {
+          "default": "",
+          "title": "Part",
+          "type": "string"
+        },
+        "author": {
+          "default": "",
+          "title": "Author",
+          "type": "string"
+        },
+        "date": {
+          "default": "",
+          "title": "Date",
+          "type": "string"
+        },
+        "notes": {
+          "default": "",
+          "title": "Notes",
+          "type": "string"
+        }
+      },
+      "title": "CaseMeta",
+      "type": "object"
+    },
+    "SolidSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "enum": [
+            "box",
+            "cylinder",
+            "hollow_cylinder",
+            "sphere",
+            "spherical_cap",
+            "ellipsoid_head",
+            "cone_frustum",
+            "elbow",
+            "torus"
+          ],
+          "title": "Type",
+          "type": "string"
+        },
+        "dims": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "title": "Dims",
+          "type": "object"
+        },
+        "offset": {
+          "default": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "maxItems": 3,
+          "minItems": 3,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Offset",
+          "type": "array"
+        },
+        "density": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Density"
+        }
+      },
+      "required": [
+        "type",
+        "dims"
+      ],
+      "title": "SolidSpec",
+      "type": "object"
+    },
+    "Units": {
+      "additionalProperties": false,
+      "properties": {
+        "length": {
+          "default": "mm",
+          "enum": [
+            "mm",
+            "cm",
+            "m"
+          ],
+          "title": "Length",
+          "type": "string"
+        },
+        "force": {
+          "default": "kN",
+          "enum": [
+            "N",
+            "kN",
+            "t"
+          ],
+          "title": "Force",
+          "type": "string"
+        },
+        "stress": {
+          "default": "MPa",
+          "enum": [
+            "MPa",
+            "Pa"
+          ],
+          "title": "Stress",
+          "type": "string"
+        },
+        "mass": {
+          "default": "kg",
+          "enum": [
+            "kg",
+            "t"
+          ],
+          "title": "Mass",
+          "type": "string"
+        },
+        "angle": {
+          "default": "deg",
+          "enum": [
+            "deg",
+            "rad"
+          ],
+          "title": "Angle",
+          "type": "string"
+        }
+      },
+      "title": "Units",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "kind": {
+      "const": "geometry.centroid",
+      "title": "Kind",
+      "type": "string"
+    },
+    "units": {
+      "$ref": "#/$defs/Units"
+    },
+    "meta": {
+      "$ref": "#/$defs/CaseMeta"
+    },
+    "solids": {
+      "items": {
+        "$ref": "#/$defs/SolidSpec"
+      },
+      "title": "Solids",
+      "type": "array"
+    }
+  },
+  "required": [
+    "kind",
+    "solids"
+  ],
+  "title": "CentroidCase",
+  "type": "object"
+}

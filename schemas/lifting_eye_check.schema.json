@@ -1,0 +1,262 @@
+{
+  "$defs": {
+    "CaseMeta": {
+      "additionalProperties": false,
+      "properties": {
+        "project": {
+          "default": "",
+          "title": "Project",
+          "type": "string"
+        },
+        "part": {
+          "default": "",
+          "title": "Part",
+          "type": "string"
+        },
+        "author": {
+          "default": "",
+          "title": "Author",
+          "type": "string"
+        },
+        "date": {
+          "default": "",
+          "title": "Date",
+          "type": "string"
+        },
+        "notes": {
+          "default": "",
+          "title": "Notes",
+          "type": "string"
+        }
+      },
+      "title": "CaseMeta",
+      "type": "object"
+    },
+    "EyeGeometryModel": {
+      "additionalProperties": false,
+      "properties": {
+        "plate_t": {
+          "title": "Plate T",
+          "type": "number"
+        },
+        "plate_b": {
+          "title": "Plate B",
+          "type": "number"
+        },
+        "plate_h": {
+          "title": "Plate H",
+          "type": "number"
+        },
+        "hole_d": {
+          "title": "Hole D",
+          "type": "number"
+        },
+        "hole_edge": {
+          "title": "Hole Edge",
+          "type": "number"
+        }
+      },
+      "required": [
+        "plate_t",
+        "plate_b",
+        "plate_h",
+        "hole_d",
+        "hole_edge"
+      ],
+      "title": "EyeGeometryModel",
+      "type": "object"
+    },
+    "EyeLoadModel": {
+      "additionalProperties": false,
+      "properties": {
+        "design": {
+          "title": "Design",
+          "type": "number"
+        },
+        "dynamic_factor": {
+          "default": 1.0,
+          "title": "Dynamic Factor",
+          "type": "number"
+        },
+        "angle_deg": {
+          "default": 0.0,
+          "title": "Angle Deg",
+          "type": "number"
+        }
+      },
+      "required": [
+        "design"
+      ],
+      "title": "EyeLoadModel",
+      "type": "object"
+    },
+    "MaterialModel": {
+      "additionalProperties": false,
+      "properties": {
+        "grade": {
+          "default": "Q355B",
+          "title": "Grade",
+          "type": "string"
+        },
+        "fy": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fy"
+        }
+      },
+      "title": "MaterialModel",
+      "type": "object"
+    },
+    "PinModel": {
+      "additionalProperties": false,
+      "properties": {
+        "diameter": {
+          "title": "Diameter",
+          "type": "number"
+        }
+      },
+      "required": [
+        "diameter"
+      ],
+      "title": "PinModel",
+      "type": "object"
+    },
+    "Units": {
+      "additionalProperties": false,
+      "properties": {
+        "length": {
+          "default": "mm",
+          "enum": [
+            "mm",
+            "cm",
+            "m"
+          ],
+          "title": "Length",
+          "type": "string"
+        },
+        "force": {
+          "default": "kN",
+          "enum": [
+            "N",
+            "kN",
+            "t"
+          ],
+          "title": "Force",
+          "type": "string"
+        },
+        "stress": {
+          "default": "MPa",
+          "enum": [
+            "MPa",
+            "Pa"
+          ],
+          "title": "Stress",
+          "type": "string"
+        },
+        "mass": {
+          "default": "kg",
+          "enum": [
+            "kg",
+            "t"
+          ],
+          "title": "Mass",
+          "type": "string"
+        },
+        "angle": {
+          "default": "deg",
+          "enum": [
+            "deg",
+            "rad"
+          ],
+          "title": "Angle",
+          "type": "string"
+        }
+      },
+      "title": "Units",
+      "type": "object"
+    },
+    "WeldModel": {
+      "additionalProperties": false,
+      "properties": {
+        "leg": {
+          "title": "Leg",
+          "type": "number"
+        },
+        "length": {
+          "title": "Length",
+          "type": "number"
+        },
+        "electrode": {
+          "default": "E43",
+          "title": "Electrode",
+          "type": "string"
+        }
+      },
+      "required": [
+        "leg",
+        "length"
+      ],
+      "title": "WeldModel",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "kind": {
+      "const": "lifting_eye.check",
+      "title": "Kind",
+      "type": "string"
+    },
+    "units": {
+      "$ref": "#/$defs/Units"
+    },
+    "meta": {
+      "$ref": "#/$defs/CaseMeta"
+    },
+    "geometry": {
+      "$ref": "#/$defs/EyeGeometryModel"
+    },
+    "material": {
+      "$ref": "#/$defs/MaterialModel"
+    },
+    "load": {
+      "$ref": "#/$defs/EyeLoadModel"
+    },
+    "weld": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/WeldModel"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "pin": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PinModel"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "kind",
+    "geometry",
+    "load"
+  ],
+  "title": "EyeCase",
+  "type": "object"
+}

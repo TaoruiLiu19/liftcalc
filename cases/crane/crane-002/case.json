@@ -1,0 +1,25 @@
+{
+  "kind": "crane.select",
+  "units": { "length": "m", "force": "t" },
+  "meta": {
+    "project": "示例工程",
+    "part": "QY70K-1 主臂 44.5m 吊 6t",
+    "notes": "数据来自原厂性能表，查表取档，不插值"
+  },
+  "boom_len": 44.5,
+  "radius": 12.0,
+  "payload": 6.0,
+  "hook_mass": 0.616,
+  "rigging": 0.3,
+  "dynamic_factor": 1.1,
+  "ratio_limit": 0.9,
+  "region": "360",
+  "fifth_outrigger": true,
+  "crane": {
+    "brand": "徐工",
+    "model": "QY70K-1",
+    "config": "主臂44.5m",
+    "boom_len": 44.5
+  },
+  "outrigger": { "lx": 7.3, "ly": 6.1, "ex": 0.4, "ey": 0, "plate_area": 6.0 }
+}

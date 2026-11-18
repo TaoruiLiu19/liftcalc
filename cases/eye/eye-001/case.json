@@ -1,0 +1,22 @@
+{
+  "kind": "lifting_eye.check",
+  "units": { "length": "mm", "force": "kN", "stress": "MPa", "mass": "kg", "angle": "deg" },
+  "meta": {
+    "project": "示例工程",
+    "part": "顶部吊耳",
+    "author": "self",
+    "date": "2026-11-18",
+    "notes": "演示用例：数据为假设值，非真实工程"
+  },
+  "geometry": {
+    "plate_t": 30,
+    "plate_b": 300,
+    "plate_h": 400,
+    "hole_d": 80,
+    "hole_edge": 120
+  },
+  "material": { "grade": "Q355B", "fy": 355 },
+  "load": { "design": 500, "dynamic_factor": 1.1, "angle_deg": 5 },
+  "weld": { "leg": 12, "length": 600, "electrode": "E43" },
+  "pin": { "diameter": 90 }
+}

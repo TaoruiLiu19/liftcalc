@@ -1,0 +1,14 @@
+{
+  "kind": "lifting_beam.check",
+  "units": { "length": "mm", "force": "kN", "stress": "MPa" },
+  "meta": { "project": "示例工程", "part": "20t 平衡梁", "author": "self", "date": "2026-11-18" },
+  "beam": {
+    "support": "simply_supported",
+    "load_type": "udl",
+    "span": 4000,
+    "total": 200,
+    "deflection_ratio": 400
+  },
+  "section": { "type": "steel", "family": "H", "designation": "DEMO-HW300x300" },
+  "material": { "grade": "Q355B", "fy": 355 }
+}

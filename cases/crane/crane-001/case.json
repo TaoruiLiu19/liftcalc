@@ -1,0 +1,22 @@
+{
+  "kind": "crane.select",
+  "units": { "length": "m", "force": "t" },
+  "meta": { "project": "示例工程", "part": "60t 设备主吊（查表，不插值）" },
+  "boom_len": 44.5,
+  "radius": 12.5,
+  "payload": 6.5,
+  "hook_mass": 0.616,
+  "rigging": 0.3,
+  "dynamic_factor": 1.1,
+  "ratio_limit": 0.9,
+  "region": "360",
+  "fifth_outrigger": true,
+  "capacity_table": [
+    { "boom_len": 11.6,  "radius": 3.0,  "rated_load": 70.0 },
+    { "boom_len": 11.6,  "radius": 4.0,  "rated_load": 54.0 },
+    { "boom_len": 44.5,  "radius": 3.0,  "rated_load": 70.0 },
+    { "boom_len": 44.5,  "radius": 12.0, "rated_load": 9.0 },
+    { "boom_len": 44.5,  "radius": 14.0, "rated_load": 7.5 }
+  ],
+  "outrigger": { "lx": 8, "ly": 6, "ex": 0.5, "ey": 0, "plate_area": 6 }
+}
