@@ -801,11 +801,11 @@ def _capability_case(case: CapabilityCase, repo: Repo | None) -> ComputationResu
 
     hook_mass = case.hook_mass
     hook_from_db = False
+    try:
+        model_row = repo.crane_model(case.crane.brand, case.crane.model)
+    except DataError:
+        model_row = None
     if hook_mass == 0.0:
-        try:
-            model_row = repo.crane_model(case.crane.brand, case.crane.model)
-        except DataError:
-            model_row = None
         if model_row is not None and model_row.get("hook_main_t"):
             hook_mass = float(model_row["hook_main_t"])
             hook_from_db = True
@@ -1069,6 +1069,7 @@ def _capability_case(case: CapabilityCase, repo: Repo | None) -> ComputationResu
             "points_right": points_payload(right_points),
         }
 
+    aux['capability']['tonnage_class'] = model_row.get('tonnage_class') if model_row else None
     verdict_name, governing, utilization = summarize(checks)
     if case.mode == "single" and not aux["capability"]["ok"]:
         verdict_name = Verdict.FAIL

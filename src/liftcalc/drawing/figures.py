@@ -13,13 +13,12 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 from liftcalc.core.result import ComputationResult
 from liftcalc.drawing import dim as D
 from liftcalc.drawing import sheet as S
-from liftcalc.drawing.body import draw_truck
+from liftcalc.drawing.body import draw_truck, drawing_axles
 from liftcalc.drawing.primitives import (
     ALIGN_CENTER,
     ALIGN_RIGHT,
@@ -342,21 +341,6 @@ class _Paper:
         return metres * self.s
 
 
-def _draw_body(figure: Figure, paper: _Paper, body: str = "image") -> None:
-    """body="image" 贴原版车身素材；"vector" 画矢量车身（DXF 用）。"""
-    if body == "vector":
-        draw_truck(figure, paper)
-        return
-    asset = Path(__file__).resolve().parent / "assets" / "crane_body.png"
-    if not asset.exists():
-        draw_truck(figure, paper)
-        return
-    body_h = BODY_LEN * BODY_RATIO
-    left = paper(BODY_REAR, 0.0)[0]                 # 车尾在图左
-    figure.add(
-        DrawingImage(x=left, y=paper.oy, w=BODY_LEN * paper.s, h=body_h * paper.s,
-                     path=str(asset))
-    )
 
 
 def _boom_half(fraction: float) -> float:
@@ -598,11 +582,11 @@ def _draw_markers(figure: Figure, paper: _Paper, model: ElevationModel) -> None:
 
 
 def _geometry(model: ElevationModel, scale: float, derived_angle: bool,
-              body: str = "image") -> Figure:
+              axles: int | None) -> Figure:
     """只画立面几何（不含图框/标题栏/表格），用于按实际外包框排版。"""
     canvas = Figure(title="", width=0.0, height=0.0)
     paper = _Paper(scale=scale, ox=0.0, oy=0.0)
-    _draw_body(canvas, paper, body)
+    draw_truck(canvas, paper, axles)
     _draw_boom(canvas, paper, model)
     _draw_rope(canvas, paper, model)
     _draw_hook_block(canvas, paper, model)
@@ -645,7 +629,7 @@ def _items_overlap(items: list[Any], rect: S.Rect) -> bool:
 def _build_sheet_view(model: ElevationModel, model_notes: list[str],
                       cap: dict[str, Any], detail: dict[str, Any],
                       sheet: S.Sheet, orientation: str,
-                      body: str = "image") -> Figure | None:
+                      axles: int | None) -> Figure | None:
     """在给定图幅上排一次版并出图。"""
     derived_angle = detail.get("boom_angle") is None
 
@@ -669,7 +653,7 @@ def _build_sheet_view(model: ElevationModel, model_notes: list[str],
     chosen = None
     for denom_value in SCALE_LADDER:
         scale = 1000.0 / denom_value
-        geometry = _geometry(model, scale, derived_angle, body)
+        geometry = _geometry(model, scale, derived_angle, axles)
         bx0, by0, bx1, by1 = geometry.bbox()
         width, height = bx1 - bx0, by1 - by0
         if width > area_w + slack or height > area_h + slack:
@@ -684,7 +668,7 @@ def _build_sheet_view(model: ElevationModel, model_notes: list[str],
     if chosen is None:                                   # 最大一档也放不下：取最小比例
         denom_value = SCALE_LADDER[-1]
         scale = 1000.0 / denom_value
-        geometry = _geometry(model, scale, derived_angle, body)
+        geometry = _geometry(model, scale, derived_angle, axles)
         bx0, by0, bx1, by1 = geometry.bbox()
         dx = area[0] - bx0
         dy = area[1] - by0
@@ -705,7 +689,7 @@ def _build_sheet_view(model: ElevationModel, model_notes: list[str],
     # ---- 性能表 ----------------------------------------------------------
     rated_lift = detail.get("lift_height")
     rows: list[tuple[str, str]] = [
-        ("机型", str(detail.get("model") or cap.get("model") or "")),
+        ("机型", f"{detail.get('model') or cap.get('model') or ''} / " + (f'{axles}轴示意' if axles else '轴数未定')),
         ("臂长 L", f"{model.boom_len:.2f} m"),
         ("幅度 R", f"{model.radius:g} m"),
         ("仰角 a", f"{model.boom_angle:.1f}°"),
@@ -754,6 +738,7 @@ def _build_sheet_view(model: ElevationModel, model_notes: list[str],
     figure.meta = {
         "orientation": orientation,
         "scale_denom": denom_value,
+        "axles": axles,
         "scale": scale,
         "paper": (sheet.width, sheet.height),
         "content_rect": content_rect,
@@ -767,7 +752,7 @@ def _build_sheet_view(model: ElevationModel, model_notes: list[str],
     return figure
 
 
-def elevation_figure(result: ComputationResult, *, body: str = "image") -> Figure | None:
+def elevation_figure(result: ComputationResult) -> Figure | None:
     """吊装立面图：自动选图幅方向（竖幅/横幅）与标准比例，再排图框、标题栏、
     性能表、说明、尺寸链与引线。"""
     cap = result.aux.get("capability") or {}
@@ -775,11 +760,13 @@ def elevation_figure(result: ComputationResult, *, body: str = "image") -> Figur
     if detail is None:
         return None
     model, model_notes = _elevation_model(cap, detail, result.aux.get("load") or {})
+    brand = (result.aux.get('case', {}).get('crane') or {}).get('brand', '徐工')
+    axles = drawing_axles(cap, detail, brand)
 
     candidates: list[Figure] = []
     for width, height, name in ((297.0, 420.0, "portrait"), (420.0, 297.0, "landscape")):
         view = _build_sheet_view(model, model_notes, cap, detail,
-                                 S.Sheet(width=width, height=height), name, body)
+                                 S.Sheet(width=width, height=height), name, axles)
         if view is not None:
             candidates.append(view)
     if not candidates:
@@ -798,14 +785,14 @@ def figure_for(result: ComputationResult) -> Figure | None:
     )
 
 
-def figures_for(result: ComputationResult, *, body: str = "image") -> list[Figure]:
+def figures_for(result: ComputationResult) -> list[Figure]:
     """一次产出该结果支持的全部图（能力曲线 + 立面）。body 见 elevation_figure。"""
     figures: list[Figure] = []
     for builder in (capability_figure, eye_figure, section_figure):
         figure = builder(result)
         if figure is not None:
             figures.append(figure)
-    elevation = elevation_figure(result, body=body)
+    elevation = elevation_figure(result)
     if elevation is not None:
         figures.insert(1 if figures else 0, elevation)
     return figures

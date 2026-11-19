@@ -267,15 +267,12 @@ def test_dxf_has_no_raster_but_keeps_body(repo: Repo, tmp_path: Path) -> None:
     from liftcalc.drawing.dxf import to_dxf
 
     result = elevation_result(repo, "QY70K-1")
-    raster = figures_for(result, body="image")
-    vector = figures_for(result, body="vector")
-    raster_elev = next(f for f in raster if f.title == "吊装立面图")
+    vector = figures_for(result)
     vector_elev = next(f for f in vector if f.title == "吊装立面图")
-    assert any(isinstance(item, Image) for item in raster_elev.primitives)
     assert not any(isinstance(item, Image) for item in vector_elev.primitives)
     assert any(isinstance(item, Circle) for item in vector_elev.primitives)
 
-    path = to_dxf(raster_elev, tmp_path / "raster.dxf")
+    path = to_dxf(vector_elev, tmp_path / "vector.dxf")
     import ezdxf
 
     doc = ezdxf.readfile(path)
