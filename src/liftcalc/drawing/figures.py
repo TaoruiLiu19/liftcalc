@@ -18,7 +18,11 @@ from typing import Any
 from liftcalc.core.result import ComputationResult
 from liftcalc.drawing import dim as D
 from liftcalc.drawing import sheet as S
-from liftcalc.drawing.body import draw_truck, drawing_axles
+from liftcalc.drawing.body import (
+    BODY_MODEL_FRONT,
+    draw_truck,
+    drawing_axles,
+)
 from liftcalc.drawing.primitives import (
     ALIGN_CENTER,
     ALIGN_RIGHT,
@@ -50,10 +54,7 @@ HINGE_H = 4.7
 BOOM_HALF_FOOT = 0.80     # 臂根半宽
 BOOM_HALF_TIP = 0.58      # 臂端半宽
 BOOM_JOINTS = (0.30, 0.52, 0.72, 0.88)   # 伸缩节搭接位置（占臂长比例）
-BODY_LEN = 13.6           # 车身总长
-BODY_REAR = 3.6           # 车尾（含配重）距回转中心；与素材上的臂架铰点对齐
-BODY_FRONT = BODY_LEN - BODY_REAR
-BODY_RATIO = 126.0 / 380.0   # 车身素材高宽比
+BODY_FRONT = BODY_MODEL_FRONT   # 车头前沿距回转中心（车身标定见 drawing/body.py）
 BLOCK_W = 0.90            # 吊钩组筒体宽
 BLOCK_H = 2.40            # 吊钩组筒体高
 BLOCK_GAP = 0.40          # 筒体底到吊钩中心
@@ -689,7 +690,7 @@ def _build_sheet_view(model: ElevationModel, model_notes: list[str],
     # ---- 性能表 ----------------------------------------------------------
     rated_lift = detail.get("lift_height")
     rows: list[tuple[str, str]] = [
-        ("机型", f"{detail.get('model') or cap.get('model') or ''} / " + (f'{axles}轴示意' if axles else '轴数未定')),
+        ("机型", str(detail.get("model") or cap.get("model") or "")),
         ("臂长 L", f"{model.boom_len:.2f} m"),
         ("幅度 R", f"{model.radius:g} m"),
         ("仰角 a", f"{model.boom_angle:.1f}°"),

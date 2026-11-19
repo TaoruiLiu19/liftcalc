@@ -805,10 +805,9 @@ def _capability_case(case: CapabilityCase, repo: Repo | None) -> ComputationResu
         model_row = repo.crane_model(case.crane.brand, case.crane.model)
     except DataError:
         model_row = None
-    if hook_mass == 0.0:
-        if model_row is not None and model_row.get("hook_main_t"):
-            hook_mass = float(model_row["hook_main_t"])
-            hook_from_db = True
+    if hook_mass == 0.0 and model_row is not None and model_row.get("hook_main_t"):
+        hook_mass = float(model_row["hook_main_t"])
+        hook_from_db = True
 
     required = crane_capability.required_load(
         payload=case.payload,
