@@ -48,11 +48,11 @@ def test_legacy_result_falls_back_to_catalog() -> None:
     assert drawing_axles({"model": "未知型号", "required": 500}, {}, "徐工") is None
 
 
-def _synthetic_result(tonnage: float) -> ComputationResult:
+def _synthetic_result(tonnage: float | None) -> ComputationResult:
     cap = {
         "ok": True,
         "mode": "single",
-        "model": f"{tonnage:g}t 示意",
+        "model": "示意机型",
         "tonnage_class": tonnage,
         "required": 10.0,
         "limit": 0.9,
@@ -65,6 +65,17 @@ def _synthetic_result(tonnage: float) -> ComputationResult:
     }
     return ComputationResult(kind="crane.capability", engine_version="test",
                              aux={"capability": cap})
+
+
+def test_unknown_model_still_draws_a_truck() -> None:
+    """吨级查不到时，轴数记为 None，但车身仍按五轴描点画，不留空底盘。"""
+    figure = elevation_figure(_synthetic_result(None))
+    assert figure is not None
+    assert figure.meta["axles"] is None
+    outer = [item for item in figure.primitives
+             if isinstance(item, Circle)
+             and abs(item.r - WHEEL_R * figure.meta["scale"]) < 1e-9]
+    assert len({round(item.cx, 6) for item in outer}) == 5
 
 
 def test_elevation_uses_vector_body_with_expected_axles() -> None:

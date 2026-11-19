@@ -116,7 +116,8 @@ def draw_truck(figure: Figure, paper, axles: int | None) -> None:
         detail((left + 12, 226), (left + 23, 226))
 
     # 车轮：每轴一轮（立面只见外轮），三道同心圆 + 轮拱
-    for station in axle_stations(axles):
+    # 吨级不明（axles=None）时按描点来源的五轴画，别画成没轮子的车
+    for station in axle_stations(axles or DEFAULT_AXLES):
         center = (point(station, 0.0)[0], paper(0.0, WHEEL_R)[1])
         for fraction, layer in ((1.0, LAYER_OUTLINE), (0.57, LAYER_THIN),
                                 (0.24, LAYER_OUTLINE)):
