@@ -6,6 +6,21 @@
 
 ---
 
+## Windows 单机桌面工作台
+
+![单机吊装工作台，QY70K-1 查表与四轴立面](docs/handover/assets/dusk-single.png)
+
+[查看桌面 CAD 核图界面](docs/handover/assets/dusk-cad.png)
+
+在安装 Python 3.12 或更高版本、Microsoft Edge WebView2 运行时的 Windows 电脑上，双击仓库根目录的 `启动单机工作台.cmd`。首次启动会在项目的 `.venv` 中安装桌面依赖，需要联网。以后可离线启动。界面和 CAD 资源随仓库提供。
+
+1. 在左栏选择机型和配置，输入吊件、索具与吊钩重量。吊钩留空时读取机型库，缺失时请补录。按最远幅度或指定幅度查表，可同时约束钩高。
+2. 点击“计算并生成图纸”，在右栏查看结果，点“查看原厂格点”定位采用的配置、臂长、幅度和来源。编辑输入后需要重新计算。
+3. “CAD 核图”用 MLightCAD 读取本次导出的真实 DXF，也可打开本地 DXF（上限 32 MB）。支持图层显隐、平移缩放、全图和自由点选测距。本次立面按图面毫米及出图比例显示折算距离，外部文件按其图形单位显示。预览范围为 DXF。
+4. 可导出 DXF、SVG、PNG 或 Word 复核报告。图示轴数、车辆外形及净空用于表达工况，工程尺寸以厂家资料为准。
+
+工作台采用 Vue 3、TypeScript、pywebview 和现有 Python 计算内核。修改界面后在 `frontend` 目录运行 `pnpm install --frozen-lockfile` 和 `pnpm run build`，将生成的 `src/liftcalc/dusk_static` 随源码一起提交。已安装桌面扩展的环境也可以运行 `python -m liftcalc.dusk`。
+
 ## 一、它能回答什么问题
 
 **问：10 吨货，我这台 70 吨车能吊多远？**
@@ -128,7 +143,7 @@ pip install pint numpy pydantic python-docx ezdxf typer PyYAML pytest hypothesis
 比例是**真实的**：按内容外包框在标准比例梯 1:50 / 1:100 / 1:150 / 1:200 … 里取最大可容的一档，
 所以标题栏、说明里写的比例与图上量出来的一致（过去写死 1:100，实际是 1:131）。
 
-> **同一矢量车身**：SVG、PNG、DXF 共用按参考图描点重绘的驾驶室、上车、车架与轮组，放大不发虚。轴数只按机型额定吨级示意：≤100 t 五轴，100–300 t 六轴，≥300 t 八轴；轴距与轴荷不是厂商参数。`drawing/assets/crane_body.png` 只是描点来源，不再直接贴图。
+> **同一矢量车身**：SVG、PNG、DXF 共用按参考图描点重绘的驾驶室、上车、车架与轮组，放大不发虚。轴数只按机型额定吨级示意：≤100 t 四轴，100–300 t 六轴，≥300 t 八轴；轴距与轴荷不是厂商参数。`drawing/assets/crane_body.png` 只是描点来源，不再直接贴图。
 
 ---
 

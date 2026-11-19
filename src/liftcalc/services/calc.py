@@ -828,6 +828,7 @@ def _capability_case(case: CapabilityCase, repo: Repo | None) -> ComputationResu
                 boom_angle=None if row["boom_angle"] is None else float(row["boom_angle"]),
                 lift_height=None if row["lift_height"] is None else float(row["lift_height"]),
                 config=str(row.get("config_name") or ""),
+                source_ref=str(row.get('source_ref') or ''),
             )
             for row in rows
         ]
@@ -858,7 +859,10 @@ def _capability_case(case: CapabilityCase, repo: Repo | None) -> ComputationResu
     left_points = load_points(case.crane)
 
     if case.mode == "single":
-        verdict = crane_capability.find_capability(left_points, required=required, ratio_limit=limit)
+        verdict, records, status, explanation = crane_capability.assess_single(
+            left_points, required=required, limit=limit, height=case.required_lift_height,
+            radius=case.target_radius, config=case.config, hook_known=hook_mass > 0,
+        )
         ok = verdict.ok
         checks.append(
             CheckResult(
@@ -866,12 +870,12 @@ def _capability_case(case: CapabilityCase, repo: Repo | None) -> ComputationResu
                 title="反查结论",
                 formula_id="crane.capability",
                 substituted=(
-                    f"计算荷载 {required:.2f} t，负荷率上限 {limit:.0%}，扫描 {verdict.checked} 个格点 → "
-                    + (f"能吊，最远 {verdict.max_radius:g} m" if ok else "不能吊")
+                    f"计算荷载 {required:.2f} t，负荷率上限 {limit:.0%}，核对 {len(records)} 个格点 → "
+                    + status + '：' + explanation
                 ),
                 inputs={"required": round(required, 3), "limit": limit},
                 value=0.0 if verdict.max_radius is None else round(verdict.max_radius, 3),
-                verdict=Verdict.PASS if ok else Verdict.FAIL,
+                verdict=Verdict.PASS if ok else (Verdict.NA if status == '资料不足' else Verdict.FAIL),
                 unit="m",
                 source="原厂性能表（查表取档，不插值）",
             )
@@ -924,7 +928,7 @@ def _capability_case(case: CapabilityCase, repo: Repo | None) -> ComputationResu
                     )
                 )
                 ok = ok and height_ok
-        else:
+        elif verdict.shortfall_t is not None:
             checks.append(
                 CheckResult(
                     id="capability.shortfall",
@@ -954,7 +958,9 @@ def _capability_case(case: CapabilityCase, repo: Repo | None) -> ComputationResu
             "hook_mass": hook_mass,
             "hook_from_db": hook_from_db,
             "limit": limit,
-            "checked": verdict.checked,
+            "checked": len(records), "status": status, "explanation": explanation,
+            "records": records, "target_radius": case.target_radius,
+            "closest_utilization": verdict.closest_utilization,
             "ok": ok,
             "max_radius": verdict.max_radius,
             "config": verdict.config,
@@ -968,6 +974,8 @@ def _capability_case(case: CapabilityCase, repo: Repo | None) -> ComputationResu
             "points": points_payload(left_points),
         }
     else:
+        if case.target_radius is not None or case.config is not None:
+            raise InputError("指定幅度与配置仅用于单机工作台")
         if case.second is None:
             raise InputError("双机模式需要给出第二台机型 second")
         right_points = load_points(case.second)
@@ -1070,8 +1078,6 @@ def _capability_case(case: CapabilityCase, repo: Repo | None) -> ComputationResu
 
     aux['capability']['tonnage_class'] = model_row.get('tonnage_class') if model_row else None
     verdict_name, governing, utilization = summarize(checks)
-    if case.mode == "single" and not aux["capability"]["ok"]:
-        verdict_name = Verdict.FAIL
     if case.mode == "dual" and not aux["capability"]["ok"]:
         verdict_name = Verdict.FAIL
     return ComputationResult(

@@ -251,17 +251,20 @@ class CapabilityCase(CaseEnvelope):
     """
 
     kind: Literal["crane.capability"]
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    target_radius: float | None = Field(default=None, gt=0)
+    config: str | None = None
     mode: Literal["single", "dual"] = "single"
     payload: float
     hook_mass: float = 0.0
     rigging: float = 0.0
     dynamic_factor: float = 1.1
-    limit: float | None = None
+    limit: float | None = Field(default=None, gt=0, le=1)
     crane: CraneRef
     second: CraneRef | None = None
     left_share: float = 0.6
     asynchronism: float = 1.0
-    required_lift_height: float | None = None
+    required_lift_height: float | None = Field(default=None, ge=0)
     # 以下三项只影响立面图的示意尺寸，不参与能力反查
     load_width_m: float = Field(default=3.2, gt=0)
     load_height_m: float = Field(default=3.8, gt=0)

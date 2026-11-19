@@ -15,6 +15,24 @@ from liftcalc.services.calc import run_case
 PACK = Path(__file__).resolve().parents[1] / "src" / "liftcalc" / "data" / "pack"
 
 
+def test_requested_height_and_radius_use_the_same_chart_cell():
+    from liftcalc.crane.capability import Point, assess_single
+
+    points = [
+        Point(20, 8, 14, lift_height=15, config="A"),
+        Point(20, 10, 13, lift_height=12, config="A"),
+        Point(30, 10, 14, lift_height=24, config="B"),
+    ]
+    conditions = dict(required=10, limit=.9, height=14, radius=None, config="A", hook_known=True)
+    best, rows, status, _ = assess_single(points, **conditions)
+    assert status == "满足" and best.max_radius == 8
+    assert [row["reason"] for row in rows] == ["满足", "钩高不足"]
+    assert assess_single(points, **{**conditions, "radius": 9})[2] == "资料不足"
+    assert assess_single(points, **{**conditions, "hook_known": False})[2] == "资料不足"
+    best, _, status, _ = assess_single(points, **{**conditions, "radius": 9, "height": None})
+    assert status == "满足" and best.max_radius == 10
+
+
 @pytest.fixture(scope="module")
 def repo(tmp_path_factory: pytest.TempPathFactory) -> Repo:
     path = tmp_path_factory.mktemp("db2") / "calc.sqlite"
@@ -43,14 +61,14 @@ def test_four_models_ranking(repo: Repo) -> None:
     """吨位越大，10 t 货能吊得越远。"""
     radii = {}
     for model in ("QY70K-1", "QY100H-3", "QY130H-1", "QAY200"):
-        result = run_case(_case(model), repo)
+        result = run_case(_case(model, hook_mass=1.0), repo)
         radii[model] = result.aux["capability"]["max_radius"]
     assert radii["QY70K-1"] < radii["QY100H-3"] < radii["QY130H-1"] < radii["QAY200"]
 
 
 def test_counterweight_config_is_reported(repo: Repo) -> None:
     """同一机型有多个配重时，结论要说明用的是哪一套。"""
-    result = run_case(_case("QY130H-1"), repo)
+    result = run_case(_case("QY130H-1", hook_mass=1.0), repo)
     config = result.aux["capability"]["config"]
     assert config is not None
     assert "配重" in config

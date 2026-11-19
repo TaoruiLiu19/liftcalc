@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 
 from liftcalc.core.errors import InfeasibleSectionError, OutOfTableError
 
@@ -25,6 +25,7 @@ class Point:
     boom_angle: float | None = None
     lift_height: float | None = None
     config: str = ""
+    source_ref: str = ""
 
 
 @dataclass(frozen=True)
@@ -93,6 +94,60 @@ def find_capability(points: Sequence[Point], *, required: float, ratio_limit: fl
         closest_utilization=utilization,
         shortfall_t=required - closest.rated_load * ratio_limit,
     )
+
+
+def assess_single(points: Sequence[Point], *, required: float, limit: float, height: float | None,
+                  radius: float | None, config: str | None, hook_known: bool
+                  ) -> tuple[Verdict, list[dict], str, str]:
+    """逐配置、逐臂长核对载荷和钩高。幅度夹在两档间时，按较大的表档核载。"""
+    if required <= 0:
+        raise InfeasibleSectionError("所需吊重必须为正")
+    groups: dict[tuple[str, float], list[Point]] = {}
+    for point in points:
+        if config is None or point.config == config:
+            groups.setdefault((point.config, point.boom_len), []).append(point)
+    eligible = []
+    records = []
+    candidates = []
+    for key in sorted(groups):
+        series = sorted(groups[key], key=lambda point: point.radius)
+        if radius is not None:
+            if not series[0].radius <= radius <= series[-1].radius:
+                continue
+            series = [next(point for point in series if point.radius >= radius)]
+        for point in series:
+            if not hook_known:
+                reason = '缺吊钩自重'
+            elif required > point.rated_load * limit + TOL:
+                reason = '载荷超限'
+            elif height is not None and (point.lift_height is None or (radius is not None and radius != point.radius)):
+                reason = '缺指定位置的高度数据'
+            elif height is not None and point.lift_height < height - TOL:
+                reason = '钩高不足'
+            else:
+                reason = '满足'
+                eligible.append(point)
+            candidates.append(point)
+            records.append({**asdict(point), 'reason': reason})
+    unknown = not records or any(row['reason'].startswith('缺') for row in records)
+    if eligible:
+        if radius is not None:
+            eligible = [max(eligible, key=lambda point: point.rated_load)]
+        verdict = find_capability(eligible, required=required, ratio_limit=limit)
+        if radius is None:
+            message = f'已验证格点中最远 {verdict.max_radius:g} m'
+        else:
+            message = f'指定幅度 {radius:g} m，按 {verdict.max_radius:g} m 表档核载；立面按该表档绘制'
+        if unknown:
+            message += '；部分候选缺数据，不能判定其可行性'
+        status = '满足'
+    else:
+        reasons = '、'.join(sorted({row['reason'] for row in records}))
+        message = reasons or '指定配置或幅度无覆盖，不外推'
+        status = '资料不足' if unknown else '不满足'
+        verdict = (find_capability(candidates, required=required, ratio_limit=limit)
+                   if reasons == '载荷超限' else Verdict(False, required, limit, len(records)))
+    return verdict, records, status, message
 
 
 def find_dual(

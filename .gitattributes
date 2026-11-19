@@ -1,0 +1,2 @@
+src/liftcalc/dusk_static/assets/*.js -text -diff linguist-generated
+src/liftcalc/dusk_static/assets/*.css -text -diff linguist-generated

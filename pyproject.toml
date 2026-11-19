@@ -18,6 +18,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+desktop = ["pywebview>=6.2,<7", "pillow>=10", "bottle>=0.13,<1"]
 dev = ["pytest", "hypothesis", "sympy", "docxtpl"]
 
 [project.scripts]
@@ -26,8 +27,11 @@ liftcalc = "liftcalc.cli.main:app"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[project.gui-scripts]
+liftcalc-desktop = "liftcalc.dusk:main"
+
 [tool.setuptools.package-data]
-liftcalc = ["data/schema.sql", "data/pack/*.csv", "data/pack/*.yaml", "data/pack/crane/*.csv"]
+liftcalc = ["data/schema.sql", "data/pack/*.csv", "data/pack/*.yaml", "data/pack/crane/*.csv", "dusk_static/*", "dusk_static/assets/*", "dusk_static/.vite/*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

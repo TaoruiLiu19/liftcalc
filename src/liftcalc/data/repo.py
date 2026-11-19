@@ -24,7 +24,7 @@ class Repo:
     def _connect(self) -> Iterator[sqlite3.Connection]:
         if not self.db_path.exists():
             raise DataError(f"数据库不存在：{self.db_path}（先运行 liftcalc data build）")
-        conn = sqlite3.connect(f"file:{self.db_path}?mode=ro", uri=True)
+        conn = sqlite3.connect(f"{self.db_path.resolve().as_uri()}?mode=ro", uri=True)
         conn.row_factory = sqlite3.Row
         try:
             yield conn
@@ -56,10 +56,15 @@ class Repo:
             raise DataError(f"机型库中没有 {brand} {model}")
         return rows[0]
 
+    def workbench_models(self) -> list[Row]:
+        return self._rows('''SELECT DISTINCT m.brand, m.model, cfg.name AS config
+            FROM crane_model m JOIN crane_config cfg ON cfg.model_id=m.id
+            JOIN crane_capacity c ON c.config_id=cfg.id ORDER BY m.brand, m.model, cfg.name''')
+
     def model_capacity(self, brand: str, model: str) -> list[Row]:
         sql = """
             SELECT cfg.boom_len AS boom_len, cfg.name AS config_name, c.radius AS radius, c.rated_load AS rated_load,
-                   c.boom_angle_deg AS boom_angle, c.lift_height_m AS lift_height
+                   c.boom_angle_deg AS boom_angle, c.lift_height_m AS lift_height, c.source_ref
               FROM crane_capacity c
               JOIN crane_config cfg ON cfg.id = c.config_id
               JOIN crane_model m ON m.id = cfg.model_id
