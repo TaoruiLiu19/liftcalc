@@ -76,6 +76,20 @@ def test_full_counterweight_chart_cells_keep_units_and_extension_codes(repo: Rep
     }
 
 
+@pytest.mark.parametrize(("model", "boom", "radius", "expected"), [
+    ("STC500", 19.38, 3, [21.5, 32.0]),
+    ("STC550C5", 45, 34, [0.9]),
+    ("STC550C5", 45, 36, []),
+    ("STC750", 11.8, 6, [43.0]),
+    ("STC750", 20.1, 6, [20.0, 33.1]),
+])
+def test_sany_full_counterweight_chart(repo, model, boom, radius, expected):
+    cells = {row["config_name"]: row["rated_load"]
+             for row in repo.model_capacity("三一", model)
+             if row["boom_len"] == boom and row["radius"] == radius}
+    assert sorted(cells.values()) == expected
+
+
 def test_four_models_ranking(repo: Repo) -> None:
     """吨位越大，10 t 货能吊得越远。"""
     radii = {}
