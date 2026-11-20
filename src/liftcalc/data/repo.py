@@ -24,7 +24,7 @@ class Repo:
     def _connect(self) -> Iterator[sqlite3.Connection]:
         if not self.db_path.exists():
             raise DataError(f"数据库不存在：{self.db_path}（先运行 liftcalc data build）")
-        conn = sqlite3.connect(f"file:{self.db_path}?mode=ro", uri=True)
+        conn = sqlite3.connect(f"{self.db_path.resolve().as_uri()}?mode=ro", uri=True)
         conn.row_factory = sqlite3.Row
         try:
             yield conn
@@ -56,10 +56,40 @@ class Repo:
             raise DataError(f"机型库中没有 {brand} {model}")
         return rows[0]
 
+    def workbench_models(self) -> list[Row]:
+        models = self._rows('''SELECT DISTINCT m.brand, m.model, m.hook_main_t, cfg.name AS config
+            FROM crane_model m JOIN crane_config cfg ON cfg.model_id=m.id
+            JOIN crane_capacity c ON c.config_id=cfg.id ORDER BY m.brand, m.model, cfg.name''')
+        hooks = {}
+        for hook in self.main_hooks():
+            hooks.setdefault((hook["brand"], hook["model"]), []).append(hook)
+        for model in models:
+            model["main_hooks"] = hooks.get((model["brand"], model["model"]), [])
+        return models
+
+    def main_hooks(self, brand: str | None = None, model: str | None = None) -> list[Row]:
+        with self._connect() as conn:
+            if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='crane_main_hook'").fetchone():
+                return []  # Catalogs built before individual main hooks were recorded.
+            query = """SELECT m.brand, m.model, h.mass_t, h.rated_t, h.is_default,
+                              m.source_doc || '#page=' || h.source_page AS source_ref
+                         FROM crane_main_hook h JOIN crane_model m ON m.id=h.model_id"""
+            clauses = []
+            params = []
+            if brand is not None:
+                clauses.append("m.brand=?")
+                params.append(brand)
+            if model is not None:
+                clauses.append("m.model=?")
+                params.append(model)
+            if clauses:
+                query += " WHERE " + " AND ".join(clauses)
+            return [dict(row) for row in conn.execute(query + " ORDER BY h.is_default DESC, h.rated_t DESC, h.mass_t DESC", params)]
+
     def model_capacity(self, brand: str, model: str) -> list[Row]:
         sql = """
             SELECT cfg.boom_len AS boom_len, cfg.name AS config_name, c.radius AS radius, c.rated_load AS rated_load,
-                   c.boom_angle_deg AS boom_angle, c.lift_height_m AS lift_height
+                   c.boom_angle_deg AS boom_angle, c.lift_height_m AS lift_height, c.source_ref
               FROM crane_capacity c
               JOIN crane_config cfg ON cfg.id = c.config_id
               JOIN crane_model m ON m.id = cfg.model_id

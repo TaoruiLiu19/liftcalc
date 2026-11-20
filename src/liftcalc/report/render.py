@@ -178,7 +178,7 @@ def render_report(
         ["引擎版本", result.engine_version],
         ["数据版本", result.data_version or "（未使用数据库）"],
         ["计算编号", result.input_digest[:8].upper()],
-        ["总体判定", _VERDICT_TEXT.get(result.verdict, "—")],
+        ["总体判定", (result.aux.get('capability') or {}).get('status') or _VERDICT_TEXT.get(result.verdict, "—")],
         ["最大利用率", f"{result.utilization:.3f}"],
         ["控制项", _CHECK_TITLES.get(result.governing or "", "—")],
     ]
@@ -235,7 +235,7 @@ def render_report(
         rigging = float(case.get("rigging") or 0.0)
         factor = float(case.get("dynamic_factor") or 1.1)
         rigging_design = rigging * factor
-        total = payload + hook + rigging_design
+        total = float(cap.get('required', payload + hook + rigging_design))
         document.add_heading("3.3.1 计算荷载的组成", level=3)
         _add_table(
             document,
@@ -249,13 +249,28 @@ def render_report(
         )
 
         points = cap.get("points") or []
-        if points:
+        limit = float(cap.get("limit") or 0.9)
+        if 'records' in cap:
+            document.add_heading('3.3.2 原厂表候选工况', level=3)
+            document.add_paragraph(cap['status'] + '：' + cap['explanation'])
+            grouped = {}
+            for record in cap['records']:
+                grouped.setdefault((record['config'], record['boom_len']), []).append(record)
+            rows = []
+            for (config, boom), records in grouped.items():
+                passed = [record for record in records if record['reason'] == '满足']
+                last = max((record['radius'] for record in passed), default=None)
+                following = next((record for record in records if last is None or record['radius'] > last), None)
+                rows.append([config or '默认', f'{boom:g}', '—' if last is None else f'{last:g}',
+                             (f"{following['radius']:g} m：{following['reason']}" if following else '本次候选中无更远档')])
+            if rows:
+                _add_table(document, ['配置', '臂长 (m)', '满足的最大表档 (m)', '下一候选及原因'], rows)
+        elif points:
             # 6.2 逐臂扫描
             document.add_heading("3.3.2 逐臂长扫描结果", level=3)
             by_boom: dict[float, list[tuple[float, float]]] = {}
             for boom, radius, rated in points:
                 by_boom.setdefault(float(boom), []).append((float(radius), float(rated)))
-            limit = float(cap.get("limit") or 0.9)
             rows = []
             for boom in sorted(by_boom):
                 series = sorted(by_boom[boom])
@@ -293,10 +308,10 @@ def render_report(
                 [
                     ["临界格", f"臂长 {float(cap['boom_len']):g} m、幅度 {radius:g} m", f"额定 {rated:g} t"],
                     ["负荷率", f"{total:.3f} ÷ {rated:g}", f"{ratio:.3f}"],
-                    ["判据", f"{ratio:.3f} ≤ {limit:.0%}", "满足" if ratio <= limit else "不满足"],
+                    ["判据", f"{ratio:.3f} ≤ {limit:.0%}", "按当前假设满足"],
                 ],
             )
-        elif not cap.get("ok"):
+        elif not cap.get("ok") and cap.get('shortfall_t') is not None:
             document.add_heading("3.3.3 不能吊时的缺口", level=3)
             document.add_paragraph(
                 f"全部格点均超限。最有利的一格在幅度 {float(cap.get('closest_radius') or 0):g} m，"
@@ -325,7 +340,9 @@ def render_report(
 
     # 5 结论
     document.add_heading("5 结论", level=1)
-    if result.verdict is Verdict.PASS:
+    if cap and 'status' in cap:
+        document.add_paragraph(f"按当前输入及假设：{cap['status']}。{cap['explanation']}。仅供复核，不作为施工依据。")
+    elif result.verdict is Verdict.PASS:
         document.add_paragraph(
             f"各项校核均满足要求，最大利用率 {result.utilization:.3f}"
             + (f"，控制项为「{_CHECK_TITLES.get(result.governing, "见结果汇总")}」。" if result.governing else "。")

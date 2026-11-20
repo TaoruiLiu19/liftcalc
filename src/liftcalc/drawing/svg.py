@@ -38,6 +38,8 @@ def to_svg(figure: Figure, margin: float = 8.0) -> str:
     )
     parts.append(f"<title>{escape(figure.title)}</title>")
     parts.append(f"<desc>{escape(figure.caption)}</desc>")
+    parts.append(f'<rect x="{-margin:.2f}" y="{-margin:.2f}" width="{width:.2f}" height="{height:.2f}" fill="white" />')
+    parts.append(f'<g transform="translate(0,{figure.height:.3f})">')
 
     for item in figure.primitives:
         layer = getattr(item, "layer", "OUTLINE")
@@ -81,5 +83,5 @@ def to_svg(figure: Figure, margin: float = 8.0) -> str:
                 f'dominant-baseline="text-before-edge"{transform}>{escape(item.content)}</text>'
             )
 
-    parts.append("</svg>")
+    parts.append("</g></svg>")
     return "\n".join(parts)

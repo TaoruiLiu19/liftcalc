@@ -805,7 +805,15 @@ def _capability_case(case: CapabilityCase, repo: Repo | None) -> ComputationResu
         model_row = repo.crane_model(case.crane.brand, case.crane.model)
     except DataError:
         model_row = None
-    if hook_mass == 0.0 and model_row is not None and model_row.get("hook_main_t"):
+    hooks = repo.main_hooks(case.crane.brand, case.crane.model) if case.mode == "single" else []
+    if hook_mass == 0.0:
+        selected_hook = next((hook for hook in hooks if hook["is_default"]), None)
+    else:
+        selected_hook = next((hook for hook in hooks if hook["mass_t"] == hook_mass), None)
+    if selected_hook is not None:
+        hook_from_db = hook_mass == 0.0
+        hook_mass = selected_hook["mass_t"]
+    elif hook_mass == 0.0 and model_row is not None and model_row.get("hook_main_t"):
         hook_mass = float(model_row["hook_main_t"])
         hook_from_db = True
 
@@ -828,6 +836,7 @@ def _capability_case(case: CapabilityCase, repo: Repo | None) -> ComputationResu
                 boom_angle=None if row["boom_angle"] is None else float(row["boom_angle"]),
                 lift_height=None if row["lift_height"] is None else float(row["lift_height"]),
                 config=str(row.get("config_name") or ""),
+                source_ref=str(row.get('source_ref') or ''),
             )
             for row in rows
         ]
@@ -846,19 +855,25 @@ def _capability_case(case: CapabilityCase, repo: Repo | None) -> ComputationResu
         },
     }
     warnings: list[str] = []
-    if hook_from_db:
+    if selected_hook:
+        warnings.append(f"采用 {selected_hook['rated_t']:g} t 主钩，自重 {hook_mass:g} t。请核对实车吊钩及穿绳倍率。")
+    elif hook_from_db:
         warnings.append(
             f"未指定吊钩重量，已按机型库取主钩自重 {hook_mass:g} t 计入计算荷载"
         )
     elif hook_mass == 0.0:
         warnings.append(
-            "未提供吊钩重量，且机型库中没有该机型的主钩自重，本次计算荷载未含吊钩——"
-            "结果偏不安全，请补填吊钩重量后重新计算"
+            "请选择实车主钩，或按铭牌填写吊钩自重（吨）后重新计算。"
         )
     left_points = load_points(case.crane)
 
     if case.mode == "single":
-        verdict = crane_capability.find_capability(left_points, required=required, ratio_limit=limit)
+        verdict, records, status, explanation = crane_capability.assess_single(
+            left_points, required=required, limit=limit, height=case.required_lift_height,
+            radius=case.target_radius, config=case.config, hook_known=hook_mass > 0,
+            hook_overload=(selected_hook is not None and
+                           case.payload + case.rigging * case.dynamic_factor > selected_hook["rated_t"] + crane_capability.TOL),
+        )
         ok = verdict.ok
         checks.append(
             CheckResult(
@@ -866,12 +881,12 @@ def _capability_case(case: CapabilityCase, repo: Repo | None) -> ComputationResu
                 title="反查结论",
                 formula_id="crane.capability",
                 substituted=(
-                    f"计算荷载 {required:.2f} t，负荷率上限 {limit:.0%}，扫描 {verdict.checked} 个格点 → "
-                    + (f"能吊，最远 {verdict.max_radius:g} m" if ok else "不能吊")
+                    f"计算荷载 {required:.2f} t，负荷率上限 {limit:.0%}，核对 {len(records)} 个格点 → "
+                    + status + '：' + explanation
                 ),
                 inputs={"required": round(required, 3), "limit": limit},
                 value=0.0 if verdict.max_radius is None else round(verdict.max_radius, 3),
-                verdict=Verdict.PASS if ok else Verdict.FAIL,
+                verdict=Verdict.PASS if ok else (Verdict.NA if status == '资料不足' else Verdict.FAIL),
                 unit="m",
                 source="原厂性能表（查表取档，不插值）",
             )
@@ -924,7 +939,7 @@ def _capability_case(case: CapabilityCase, repo: Repo | None) -> ComputationResu
                     )
                 )
                 ok = ok and height_ok
-        else:
+        elif verdict.shortfall_t is not None:
             checks.append(
                 CheckResult(
                     id="capability.shortfall",
@@ -952,9 +967,13 @@ def _capability_case(case: CapabilityCase, repo: Repo | None) -> ComputationResu
             "model": case.crane.model,
             "required": required,
             "hook_mass": hook_mass,
+            "hook_rated_t": selected_hook["rated_t"] if selected_hook else None,
+            "hook_source_ref": selected_hook["source_ref"] if selected_hook else None,
             "hook_from_db": hook_from_db,
             "limit": limit,
-            "checked": verdict.checked,
+            "checked": len(records), "status": status, "explanation": explanation,
+            "records": records, "target_radius": case.target_radius,
+            "closest_utilization": verdict.closest_utilization,
             "ok": ok,
             "max_radius": verdict.max_radius,
             "config": verdict.config,
@@ -968,6 +987,8 @@ def _capability_case(case: CapabilityCase, repo: Repo | None) -> ComputationResu
             "points": points_payload(left_points),
         }
     else:
+        if case.target_radius is not None or case.config is not None or case.required_lift_height is not None:
+            raise InputError("指定幅度、性能表配置和要求钩高仅适用于单机反查")
         if case.second is None:
             raise InputError("双机模式需要给出第二台机型 second")
         right_points = load_points(case.second)
@@ -1070,8 +1091,6 @@ def _capability_case(case: CapabilityCase, repo: Repo | None) -> ComputationResu
 
     aux['capability']['tonnage_class'] = model_row.get('tonnage_class') if model_row else None
     verdict_name, governing, utilization = summarize(checks)
-    if case.mode == "single" and not aux["capability"]["ok"]:
-        verdict_name = Verdict.FAIL
     if case.mode == "dual" and not aux["capability"]["ok"]:
         verdict_name = Verdict.FAIL
     return ComputationResult(

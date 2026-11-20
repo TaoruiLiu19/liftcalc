@@ -184,6 +184,9 @@ def build_db(pack_dir: Path, out_path: Path, data_version: str) -> BuildStats:
                         source_ref = (
                             f"{path.name} 第{row.source_page}页" if row.source_page else path.name
                         )
+                        source_doc = meta_row.get("source_doc") or ""
+                        if source_doc.startswith("https://") and row.source_page.isdecimal():
+                            source_ref = f"{source_doc}#page={row.source_page}"
                         conn.execute(
                             "INSERT INTO crane_capacity (config_id, radius, rated_load, boom_angle_deg,"
                             " lift_height_m, parts_of_line, source_ref) VALUES (?,?,?,?,?,?,?)",
@@ -220,6 +223,15 @@ def build_db(pack_dir: Path, out_path: Path, data_version: str) -> BuildStats:
                 (config_ids[config_key], row["radius"], row["rated_load"], row.get("source_ref") or "未注明"),
             )
             stats.crane_capacities += 1
+
+        for hook in _read_csv(crane_dir / "main_hooks.csv",
+                              ["brand", "model", "mass_t", "rated_t", "is_default", "source_page"]):
+            conn.execute(
+                """INSERT INTO crane_main_hook (model_id, mass_t, rated_t, is_default, source_page)
+                   VALUES ((SELECT id FROM crane_model WHERE brand=? AND model=?), ?, ?, ?, ?)""",
+                (hook["brand"], hook["model"], float(hook["mass_t"]), float(hook["rated_t"]),
+                 int(hook["is_default"]), int(hook["source_page"])),
+            )
 
         conn.execute("INSERT INTO meta (key, value) VALUES ('data_version', ?)", (data_version,))
         conn.execute("INSERT INTO meta (key, value) VALUES ('built_from', ?)", (str(pack_dir),))

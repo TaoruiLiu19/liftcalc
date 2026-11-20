@@ -6,6 +6,25 @@
 
 ---
 
+## Windows 单机桌面工作台
+
+![单机吊装工作台，QY70K-1 查表与四轴立面](docs/handover/assets/refract-single.png)
+
+工作台默认最大化，左侧输入工况并查看结果，右侧查看及导出图纸。默认使用 Refract 浅色主题，右上角可切换 Dusk 深色主题。点击吊装示意图可打开大图，在图上滚动滚轮可围绕指针缩放（100%–400%），按住左键可手型拖动。点击百分比可恢复全图，按 Esc 或点击“关闭”返回。
+
+[查看只读 CAD 核图界面](docs/handover/assets/refract-cad.png)
+
+在安装 Python 3.12 或更高版本、Microsoft Edge WebView2 运行时的 Windows 电脑上，双击仓库根目录的 `启动单机工作台.cmd`。首次启动会在项目的 `.venv` 中安装桌面依赖，需要联网。以后可离线启动。界面和 CAD 资源随仓库提供。
+
+1. 在左栏选择机型和配置，输入吊件、索具重量。核对“实车主钩”显示的额载和自重，有多种主钩时可直接切换。手动填写时使用铭牌自重，单位为吨。按最远幅度或指定幅度查表，可同时约束钩高。
+2. 点击“计算并生成图纸”，在左栏查看采用幅度、臂长、起升高度和负荷率。编辑工况后请重新计算。
+3. “CAD 核图”支持本次 DXF 和 32 MB 以内的本地 DXF。按住鼠标左键平移，滚动滚轮缩放，点击“全图”恢复视野。
+4. 可导出 DXF、SVG、PNG 或 Word 复核报告。图示轴数、车辆外形及净空用于表达工况，工程尺寸以厂家资料为准。
+
+工作台采用 Vue 3、TypeScript、pywebview 和现有 Python 计算内核。修改界面后在 `frontend` 目录运行 `pnpm install --frozen-lockfile` 和 `pnpm run build`，将生成的 `src/liftcalc/dusk_static` 随源码一起提交。已安装桌面扩展的环境也可以运行 `python -m liftcalc.dusk`。
+
+桌面端提供单机复核。双机按比例分载使用下方 CLI 的 `--mode dual`。前端源码在 `frontend/src`，CAD 查看器及文字渲染 worker 的版本由 `frontend/pnpm-lock.yaml` 锁定。本次重建使用 Node.js 24.22.3 和 pnpm 11.25.0。
+
 ## 一、它能回答什么问题
 
 **问：10 吨货，我这台 70 吨车能吊多远？**
@@ -42,7 +61,7 @@
 | 双机每台上限 | **80%** |
 | 查表方式 | **取下一档，绝不插值**（原厂说明第 7 条） |
 | 计算荷载 | 吊件 + 吊钩 + 索具 × 动载系数（默认 1.1） |
-| 吊钩自重 | 不填时**自动从机型库取**；库里也没有会警告"未含吊钩" |
+| 吊钩自重 | 优先采用该车型已核实的默认主钩。没有默认值时，选择实车主钩或输入铭牌自重。 |
 | 查不到 | 明确报"无性能数据"，**不会给半截答案** |
 
 > **"最远"是怎么来的**：把该机型所有"臂长 × 幅度"格子逐个试，算出负荷率，取满足条件且幅度最大的那一格。
@@ -80,6 +99,9 @@ pip install pint numpy pydantic python-docx ezdxf typer PyYAML pytest hypothesis
 # 单机：10 吨货，QY70K-1
 .\liftcalc.ps1 capability --model QY70K-1 --payload 10 --hook 0.616 --rigging 0.3 --out out\cap.json
 
+# 单机：用 11.6 m 主臂核对 6 m 幅度、9 m 钩高
+.\liftcalc.ps1 capability --model QY70K-1 --payload 10 --config "主臂11.6m" --target-radius 6 --required-height 9
+
 # 双机：两台 QY70K-1 抬 20 吨，60/40 分配，不同步系数 1.1
 .\liftcalc.ps1 capability --mode dual --model QY70K-1 --second-model QY70K-1 `
     --payload 20 --hook 0.616 --rigging 0.5 --asynchronism 1.1 --out out\dual.json
@@ -94,9 +116,23 @@ pip install pint numpy pydantic python-docx ezdxf typer PyYAML pytest hypothesis
 | `--rigging` | 索具重量 t | 按 0 计 |
 | `--dynamic-factor` | 动载系数 | 默认 1.1 |
 | `--limit` | 负荷率上限 | 单机 0.90 / 双机 0.80 |
-| `--required-height` | 所需起升高度 m | 不做净空校核 |
+| `--target-radius` / `--radius` | 单机指定作业幅度 m。介于两档时用较大幅度档核载 | 查最远幅度 |
+| `--config` | 单机配置全名，可从结果的 `aux.capability.records[].config` 读取 | 比较全部配置 |
+| `--required-height` | 单机所需起升高度 m。同时指定幅度时，须有该位置的钩高数据 | 仅校核载荷 |
 | `--load-width` / `--load-height` | 图示吊物宽/高 m | 3.2 / 3.8（只影响立面图） |
 | `--clearance` | 图示吊物底距地净空 m | 1.0（只影响立面图） |
+
+`capability` 和 `calc` 的退出码如下。带 `--out` 时，退出码 0、1、6 都会写入结果 JSON。退出码 6 的具体原因另写入标准错误。
+
+| 退出码 | 含义 |
+|---:|---|
+| 0 | 校核通过，或纯数值计算（如截面属性）成功完成 |
+| 1 | 校核不满足 |
+| 2 | 输入或命令行参数错误 |
+| 3 | 数据库或基础数据错误 |
+| 4 | 超出计算定义域 |
+| 5 | 内部错误或启动环境错误 |
+| 6 | 吊装能力反查资料不足，例如缺少吊钩自重、指定幅度无表档覆盖或缺少该位置的钩高 |
 
 ### 3.4 出计算书
 
@@ -128,7 +164,7 @@ pip install pint numpy pydantic python-docx ezdxf typer PyYAML pytest hypothesis
 比例是**真实的**：按内容外包框在标准比例梯 1:50 / 1:100 / 1:150 / 1:200 … 里取最大可容的一档，
 所以标题栏、说明里写的比例与图上量出来的一致（过去写死 1:100，实际是 1:131）。
 
-> **同一矢量车身**：SVG、PNG、DXF 共用按参考图描点重绘的驾驶室、上车、车架与轮组，放大不发虚。轴数只按机型额定吨级示意：≤100 t 五轴，100–300 t 六轴，≥300 t 八轴；轴距与轴荷不是厂商参数。`drawing/assets/crane_body.png` 只是描点来源，不再直接贴图。
+> **同一矢量车身**：SVG、PNG、DXF 共用按参考图描点重绘的驾驶室、上车、车架与轮组，放大不发虚。轴数只按机型额定吨级示意：≤100 t 四轴，100–300 t 六轴，≥300 t 八轴；轴距与轴荷不是厂商参数。`drawing/assets/crane_body.png` 只是描点来源，不再直接贴图。
 
 ---
 
@@ -142,9 +178,47 @@ pip install pint numpy pydantic python-docx ezdxf typer PyYAML pytest hypothesis
 | QY100H-3 | 100 t | 汽车吊 | 9 | 152 |
 | QY130H-1 | 130 t | 汽车吊 | 18（配重 30/20 t 两套） | 273 |
 | QAY200 | 200 t | 全地面 | 12 | 214 |
-| **合计** | | | **46** | **716** |
+| XCT25L5_Y | 25 t | 汽车吊 | 15（固定全配重 5.8 t） | 192 |
+| XCT60_Y | 60 t | 汽车吊 | 15（固定 5.5 t + 活动 1 t） | 204 |
+| XCT100_1 | 100 t | 汽车吊 | 29（全配重 45 t，按伸缩码分列） | 432 |
+| 三一 STC500 | 50 t | 汽车吊 | 11（固定全配重 3.5 t） | 183 |
+| 三一 STC550C5 | 55 t | 汽车吊 | 15（固定 5.2 t + 活动 2.3 t） | 216 |
+| 三一 STC750 | 75 t | 汽车吊 | 9（固定 4.5 t + 活动 2 t） | 154 |
+| 三一 STC1100T7 | 110 t | 汽车吊 | 14（全配重 38.5 t，侧后方） | 242 |
+| 三一 STC1200T7 | 120 t | 汽车吊 | 14（巴西缓速器版，全配重 36.2 t） | 234 |
+| 三一 STC1600T7 | 160 t | 汽车吊 | 28（全配重 52 t，常规位和全后移各 14 组） | 463 |
+| 三一 STC2000C8-8 | 200 t | 汽车吊 | 14（2024 款，全配重 61 t） | 281 |
+| 三一 STC2400C8PHEV | 240 t | 汽车吊 | 18（全配重 71 t，后移 R 位） | 394 |
+| 三一 STC3000C8-8 | 300 t | 汽车吊 | 17（全配重 73.5 t，普通主臂） | 352 |
+| **合计** | | | **245** | **4063** |
 
-数据全部来自徐工原厂性能表，**逐格转录，每格都过了校验**（幅度递增、额定值单调不增、不超吨位、起升高度单调、几何一致性）。
+下列六款采用全配重、主臂、支腿全伸、360° 工况。页码从 PDF 封面起算，每个入库格点带有对应页的链接。
+
+| 机型 | 支腿跨距（纵 × 横）及条件 | 格点幅度 | 原厂性能表 |
+|---|---|---|---|
+| XCT25L5_Y | 5.23 × 6.4 m，第五支腿支好 | 3–32 m | [规格书 PDF 第 14–15 页](https://www.wme.cn/xcmg-xct25l5y/xcmg-xct25l5y.pdf#page=14) |
+| XCT60_Y | 6.1 × 7.1 m，第五支腿支好 | 3–34 m | [规格书 PDF 第 9–10 页](https://cdn2.antbuildz.com/images/801140e237a2c5fee8df6b44b.pdf#page=9) |
+| XCT100_1 | 8.45 × 7.9 m，按表底五位伸缩码选择 | 3–54 m | [徐工欧洲规格书 PDF 第 15–16 页](https://xcmg-eu.com/wp-content/uploads/2021/12/XCT100.pdf#page=15) |
+| STC500 | 6 × 7.2 m，11.5–43 m 主臂，按第 2 节至顶节伸出率选择 | 3–34 m | [三一规格书 PDF 第 7 页左表](https://sanyglobal-img.sany.com.cn/product/picture_album/20200929/STC500-13%20Broch-224154.pdf#page=7) |
+| STC550C5 | 6.05 × 7.4 m，第五支腿支好，11.6–45 m 主臂 | 3–34 m | [三一规格书 PDF 第 10 页](https://sanyglobal-img.sany.com.cn/sanyglobal-com-prd/prod/20251226/Sany-brochure-STC550C5-20240329-EN-CN_200143.pdf#page=10) |
+| STC750 | 6.1 × 7.6 m，11.8–45 m 主臂，按伸缩组合选择 | 3–32 m | [三一规格书 PDF 第 7 页右表](https://www.sanyglobal.com/all/d/file/p/2017-03-02/af0f448e4762f6053306cb254e378409.pdf#page=7) |
+
+这六款主臂表的空格、逐格钩高和仰角均留空。表中的幅度范围汇总了该机型所有伸缩组合，每个组合只能查到原表列出的幅度。
+
+计算时按实车核对吊钩自重、额定能力及倍率。XCT100_1 标配 75 t 主钩自重 0.530 t，选配 130 t 主钩自重 1.017 t。STC500 的主钩有 0.610 t 和 0.555 t 两种，STC750 的两种主钩分别为 0.800 t（75 t 钩）和 0.320 t（30 t 钩）。STC550C5 规格书的吊钩参数表与性能表备注所列自重有出入，库中主副钩自重均留空，按实车填写。
+
+#### 110–300 t 三一汽车吊的查表条件
+
+下表六款均采用支腿全伸的主臂表。工作台列有对应车型的原厂主钩，可按实车选择。各格点均可回到对应的 PDF 页。带星号的特殊额定值和原表空格均未录入。
+
+| 车型 | 适用范围和转录说明 | 厂家原表 |
+|---|---|---|
+| STC1100T7 | 页脚限定侧方及后方作业。13.9 m 主臂的 3 m 和 3.5 m 两格有星号。 | [第 10 页](https://sanyglobal-img.sany.com.cn/product/picture_album/20211027/Sany_crane-brochure_STC1100T7-150757.pdf#page=10) |
+| STC1200T7 | 巴西缓速器版，360°。2.5 m 幅度的 120 t 格点需辅助装置。第 8 页尺寸图与第 9 页规格表对支腿纵横顺序的标注相反，数据库的纵横跨距留空。 | [第 16 页](https://sanyglobal-img.sany.com.cn/sanyglobal-com-prd/prod/20251226/Sany-brochure-STC1200T7-Brazil-Retarder-20231018-EN-CN_195416.pdf#page=16) |
+| STC1600T7 | 360°，按实际配重位置选表。带星号的格点需提高倍率并使用指定吊钩。 | [全后移第 23 页](https://sanyglobal-img.sany.com.cn/sanyglobal-com-prd/prod/20251230/Sany-brochure-STC1600T7-20230606-EN-CN_220415.pdf#page=23)、[常规位第 25 页](https://sanyglobal-img.sany.com.cn/sanyglobal-com-prd/prod/20251230/Sany-brochure-STC1600T7-20230606-EN-CN_220415.pdf#page=25) |
+| STC2000C8-8 | 2024 款，360°。第 7 页左表的 21.0 m、39.8 m 与第 6 页曲线标注不一致，另有两列同标 59.4 m。四列均暂缺。 | [第 7 页左表](https://cos-www.sanygroup.com/2024/03/26/STC2000C8-8%2824%E6%AC%BE%29%E5%8D%95%E8%A1%8C%E6%9C%AC%E4%B8%AD%E6%96%87%E7%89%8820240129.pdf#page=7) |
+| STC2400C8PHEV | 360°，配重后移，按 2024 年 5 月手册封面的型号入库。产品页写作 STC2400C8-8PHEV。 | [第 11 页](https://cos-www.sanygroup.com/2024/07/03/STC2400C8PHEV%E5%8D%95%E8%A1%8C%E6%9C%AC%E4%B8%AD%E6%96%87%E7%89%8820240528%281%29.pdf#page=11) |
+| STC3000C8-8 | 360°。双星号表示能力等级，单星号要求辅助装置。40 m 主臂在 6 m、6.5 m 幅度的表值依次为 83.9 t 和 87.0 t，该列暂缺。普通主臂已收录的最大表值为 124.8 t。 | [第 11 页](https://cos-www.sanygroup.com/2024/07/19/STC3000C8-8%E5%8D%95%E8%A1%8C%E6%9C%AC%E4%B8%AD%E6%96%87%E7%89%8820240711.pdf#page=11) |
 
 ### 4.2 未录入
 
@@ -190,8 +264,11 @@ pip install pint numpy pydantic python-docx ezdxf typer PyYAML pytest hypothesis
 **查某机型报"没有性能数据"**
 该机型没录入（见 4.2），或数据库没建（先跑 `data build`）。
 
-**结果里出现"未含吊钩"的警告**
-机型库里没有该机型的主钩自重。**必须补填 `--hook`**，否则计算荷载偏小、最远幅度偏大，结果偏不安全。
+**计算时提示“缺吊钩自重”怎么办？**
+
+在“实车主钩”选择已安装的吊钩。例如 STC750 有 75 t 和 30 t 两款主钩，自重分别为 0.800 t 和 0.320 t。QY100H-3、QY130H-1 和 STC550C5 需按铭牌填写自重。命令行用 `--hook` 传入吨数，例如 800 kg 填 `--hook 0.8`。切换车型后重新核对吊钩。
+
+选用库内吊钩时，单机会分别校核吊钩额载与整机性能表。输入其他实测自重时，计算会计入该自重，吊钩额载和穿绳倍率需按实车核对。
 
 **为什么 10 吨比 30 吨吊得远？**
 不是车的问题，是臂长：轻货能用长臂（25.98 m 臂在 10 m 幅度还有 15.5 t），重货只能用短臂。
@@ -223,7 +300,7 @@ docs/handover/          交接文档（含原版参照图与待办）
 
 ## 八、限制与免责
 
-- 只覆盖 **4 个机型 716 格**，其余需自行补录
+- 当前覆盖 **15 款汽车吊、1 款全地面起重机，共 4063 个主臂格点**。
 - 立面图是**能力反查示意图**：吊物按方框示意，车身、臂架为简化线稿，不是施工图
 - 未做风载、偏心、多机不同步的动力分析，只用系数简化
 - 原厂表只给**支腿全伸**工况

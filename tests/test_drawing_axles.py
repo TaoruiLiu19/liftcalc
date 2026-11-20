@@ -21,7 +21,7 @@ from liftcalc.drawing.primitives import Circle, Image
 
 @pytest.mark.parametrize(
     ("tonnage", "expected"),
-    [(70, 5), (100, 5), (101, 6), (130, 6), (200, 6), (299, 6), (300, 8), (500, 8)],
+    [(70, 4), (100, 4), (101, 6), (130, 6), (150, 6), (200, 6), (299, 6), (300, 8), (500, 8)],
 )
 def test_axle_count_by_tonnage(tonnage: float, expected: int) -> None:
     assert axle_count(tonnage) == expected
@@ -33,7 +33,7 @@ def test_unknown_tonnage_has_no_axles() -> None:
     assert axle_stations(None) == ()
 
 
-@pytest.mark.parametrize("count", [5, 6, 8])
+@pytest.mark.parametrize("count", [4, 5, 6, 8])
 def test_axle_spacing_keeps_tyres_apart(count: int) -> None:
     stations = axle_stations(count)
     gaps = [right - left for left, right in pairwise(stations)]
@@ -43,7 +43,7 @@ def test_axle_spacing_keeps_tyres_apart(count: int) -> None:
 
 def test_legacy_result_falls_back_to_catalog() -> None:
     """老结果 JSON 里没有 tonnage_class，按机型回查机型库 CSV。"""
-    assert drawing_axles({"model": "QY70K-1", "required": 300}, {}, "徐工") == 5
+    assert drawing_axles({"model": "QY70K-1", "required": 300}, {}, "徐工") == 4
     assert drawing_axles({"model": "QAY200", "required": 1}, {}, "徐工") == 6
     assert drawing_axles({"model": "未知型号", "required": 500}, {}, "徐工") is None
 
@@ -81,10 +81,10 @@ def test_unknown_model_still_draws_a_truck() -> None:
 def test_elevation_uses_vector_body_with_expected_axles() -> None:
     figure = elevation_figure(_synthetic_result(70))
     assert figure is not None
-    assert figure.meta["axles"] == 5
+    assert figure.meta["axles"] == 4
     assert not any(isinstance(item, Image) for item in figure.primitives)
 
     outer = [item for item in figure.primitives
              if isinstance(item, Circle)
              and abs(item.r - WHEEL_R * figure.meta["scale"]) < 1e-9]
-    assert len({round(item.cx, 6) for item in outer}) == 5
+    assert len({round(item.cx, 6) for item in outer}) == 4

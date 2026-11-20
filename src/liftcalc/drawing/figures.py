@@ -21,6 +21,7 @@ from liftcalc.drawing import sheet as S
 from liftcalc.drawing.body import (
     BODY_MODEL_FRONT,
     draw_truck,
+    RAM_BASE,
     drawing_axles,
 )
 from liftcalc.drawing.primitives import (
@@ -58,7 +59,7 @@ BODY_FRONT = BODY_MODEL_FRONT   # 车头前沿距回转中心（车身标定见 
 BLOCK_W = 0.90            # 吊钩组筒体宽
 BLOCK_H = 2.40            # 吊钩组筒体高
 BLOCK_GAP = 0.40          # 筒体底到吊钩中心
-SHEAVE_R = 0.55           # 臂端滑轮半径
+ROPE_OFFSET = .22
 SLING_RATIO = 0.55        # 吊索水平投影 → 竖直高度
 ROPE_MIN = 1.6            # 无起升高度数据时，吊钩组顶距臂端的最小绳长
 DEFAULT_LOAD_W = 3.2
@@ -241,11 +242,15 @@ class ElevationModel:
 
     @property
     def hinge(self) -> tuple[float, float]:
-        return 0.0, HINGE_H
+        return self.radius - self.boom_len * math.cos(self.rad), HINGE_H
+
+    @property
+    def hook_seat(self) -> tuple[float, float]:
+        return self.radius, self.hook_h
 
     @property
     def tip(self) -> tuple[float, float]:
-        return (self.boom_len * math.cos(self.rad), HINGE_H + self.boom_len * math.sin(self.rad))
+        return self.radius, HINGE_H + self.boom_len * math.sin(self.rad)
 
     @property
     def block_top(self) -> float:
@@ -345,67 +350,60 @@ class _Paper:
 
 
 def _boom_half(fraction: float) -> float:
-    return BOOM_HALF_FOOT + (BOOM_HALF_TIP - BOOM_HALF_FOOT) * fraction
+    section = sum(fraction >= joint for joint in BOOM_JOINTS)
+    return BOOM_HALF_FOOT - section * 0.115
 
 
 def _draw_boom(figure: Figure, paper: _Paper, model: ElevationModel) -> None:
-    rad = model.rad
-    ux, uy = math.cos(rad), math.sin(rad)           # 臂向（模型）
-    nx, ny = -uy, ux                                # 臂上侧法向（模型）
     hx, hy = model.hinge
+    cosine, sine = math.cos(model.rad), math.sin(model.rad)
+
+    def along(distance, normal):
+        return paper(hx + cosine * distance - sine * normal,
+                     hy + sine * distance + cosine * normal)
+
+    def profile(vertices, layer=LAYER_OUTLINE):
+        figure.add(Polyline(tuple(along(*vertex) for vertex in vertices), True, layer))
+
+    def pin(center, radius):
+        figure.add(Circle(*center, paper.s * radius, LAYER_OUTLINE))
+
+    stops = (0.0, *BOOM_JOINTS, 1.0)
+    for start, finish in zip(stops, stops[1:]):
+        near, far = model.boom_len * start, model.boom_len * finish
+        half = _boom_half(start)
+        collar = min(.32, (far - near) * .15)
+        heel = .40 if start == 0 else 0.0
+        profile(((near - heel, half * .55), (near + heel, half),
+                 (far - collar, half), (far - collar, -half),
+                 (near + heel, -half), (near - heel, -half * .55)))
+        profile(((far - collar, half), (far - collar + .07, half + .055),
+                 (far, half + .055), (far, -half - .055),
+                 (far - collar + .07, -half - .055), (far - collar, -half)))
+        figure.add(Line(*along(near + heel + .10, half * .64),
+                        *along(far - collar, half * .64), LAYER_THIN))
+
+    base = paper(*RAM_BASE)
+    head = along(model.boom_len * .28, -_boom_half(.28) - .10)
+    dx, dy = head[0] - base[0], head[1] - base[1]
+    span = math.hypot(dx, dy)
+    def cylinder_point(fraction, width):
+        return (base[0] + dx * fraction - dy / span * width * paper.s,
+                base[1] + dy * fraction + dx / span * width * paper.s)
+
+    for start, end, width in ((0, .56, .20), (.56, 1, .105)):
+        figure.add(Polyline(tuple(cylinder_point(pos, side) for pos, side in
+                                  ((start, width), (end, width), (end, -width), (start, -width))),
+                            True, LAYER_OUTLINE))
+    pin(base, .18)
+    pin(head, .15)
+    pin(along(0, 0), .26)
+    pin(along(0, 0), .11)
     length = model.boom_len
-
-    def edge(fraction: float, side: float) -> tuple[float, float]:
-        half = _boom_half(fraction)
-        return (hx + ux * length * fraction + nx * half * side,
-                hy + uy * length * fraction + ny * half * side)
-
-    top = [edge(f, +1.0) for f in (0.0, 1.0)]
-    bottom = [edge(f, -1.0) for f in (0.0, 1.0)]
-    figure.add(
-        Polyline(points=tuple(paper(*p) for p in (top[0], top[1], bottom[1], bottom[0])),
-                 closed=True, layer=LAYER_OUTLINE)
-    )
-    # 伸缩节搭接线 + 节内棱线
-    for fraction in BOOM_JOINTS:
-        a = edge(fraction, +1.0)
-        b = edge(fraction, -1.0)
-        figure.add(Line(x1=paper(*a)[0], y1=paper(*a)[1],
-                        x2=paper(*b)[0], y2=paper(*b)[1], layer=LAYER_THIN))
-    # 变幅油缸：从转台到臂下侧 1/3 处
-    anchor = (hx + ux * length * 0.34 + nx * -_boom_half(0.34),
-              hy + uy * length * 0.34 + ny * -_boom_half(0.34))
-    cyl_base = (1.9, 2.8)
-    dx, dy = anchor[0] - cyl_base[0], anchor[1] - cyl_base[1]
-    norm = math.hypot(dx, dy) or 1.0
-    ox_, oy_ = -dy / norm * 0.16, dx / norm * 0.16
-    for side in (1.0, -1.0):
-        figure.add(
-            Line(x1=paper(cyl_base[0] + ox_ * side, cyl_base[1] + oy_ * side)[0],
-                 y1=paper(cyl_base[0] + ox_ * side, cyl_base[1] + oy_ * side)[1],
-                 x2=paper(anchor[0] + ox_ * side * 0.6, anchor[1] + oy_ * side * 0.6)[0],
-                 y2=paper(anchor[0] + ox_ * side * 0.6, anchor[1] + oy_ * side * 0.6)[1],
-                 layer=LAYER_THIN)
-        )
-    # 臂架铰点
-    figure.add(Circle(cx=paper(hx, hy)[0], cy=paper(hx, hy)[1],
-                      r=max(1.2, 0.32 * paper.s), layer=LAYER_OUTLINE))
-    # 臂端滑轮组
-    tip_x, tip_y = model.tip
-    for shift in (0.0, -0.95):
-        cx = tip_x + ux * shift
-        cy = tip_y + uy * shift
-        figure.add(Circle(cx=paper(cx, cy)[0], cy=paper(cx, cy)[1],
-                          r=SHEAVE_R * paper.s, layer=LAYER_OUTLINE))
-    # 臂头支架
-    bracket = [
-        (tip_x + ux * 0.35 + nx * 0.35, tip_y + uy * 0.35 + ny * 0.35),
-        (tip_x + ux * 0.35 - nx * 0.55, tip_y + uy * 0.35 - ny * 0.55),
-        (tip_x - ux * 1.5 - nx * 0.55, tip_y - uy * 1.5 - ny * 0.55),
-        (tip_x - ux * 1.5 + nx * 0.35, tip_y - uy * 1.5 + ny * 0.35),
-    ]
-    figure.add(Polyline(points=tuple(paper(*p) for p in bracket), closed=True,
-                        layer=LAYER_THIN))
+    profile(((length - .70, .32), (length - .22, .49), (length + .26, .34),
+             (length + .37, -.12), (length + .15, -.41), (length - .68, -.32)))
+    pin(paper(*model.tip), ROPE_OFFSET)
+    pin(paper(*model.tip), .085)
 
 
 def _draw_hook_block(figure: Figure, paper: _Paper, model: ElevationModel) -> None:
@@ -442,24 +440,21 @@ def _draw_hook_block(figure: Figure, paper: _Paper, model: ElevationModel) -> No
                     x2=paper(x + half, bottom + 0.18)[0], y2=paper(x + half, bottom + 0.18)[1],
                     layer=LAYER_THIN))
 
-    # 吊钩：竖颈 + 240° 弯钩（开口朝图面吊物侧）
-    hook_r = 0.26
-    cx, cy = x - 0.26, model.hook_h + 0.10
-    points: list[tuple[float, float]] = [(x, bottom), (x, cy)]
-    for index in range(1, 25):
-        ang = math.radians(0 + 240 * index / 24)
-        points.append((cx + hook_r * math.cos(ang), cy + hook_r * math.sin(ang)))
-    figure.add(Polyline(points=tuple(paper(*p) for p in points), closed=False,
-                        layer=LAYER_OUTLINE))
+    seat_x, seat_y = model.hook_seat
+    hook = ((-.08, BLOCK_GAP), (-.08, .33), (-.20, .24), (-.25, .11),
+            (-.22, -.025), (-.13, -.10), (.01, -.13), (.15, -.09),
+            (.22, .015), (.23, .16), (.19, .23), (.13, .095),
+            (.07, .025), (0, 0), (-.08, .035), (-.12, .11),
+            (-.09, .17), (.035, .26), (.07, .33), (.07, BLOCK_GAP))
+    figure.add(Polyline(tuple(paper(seat_x + dx, seat_y + dy) for dx, dy in hook),
+                        True, LAYER_OUTLINE))
 
 
 def _draw_rope(figure: Figure, paper: _Paper, model: ElevationModel) -> None:
-    tip_x, tip_y = model.tip
-    block_top = model.block_top
-    for offset in (-0.22, 0.22):
-        a = paper(tip_x, tip_y)
-        b = paper(model.radius + offset, block_top)
-        figure.add(Line(x1=a[0], y1=a[1], x2=b[0], y2=b[1], layer=LAYER_OUTLINE))
+    for offset in (-ROPE_OFFSET, ROPE_OFFSET):
+        horizontal = model.tip[0] + offset
+        figure.add(Line(*paper(horizontal, model.tip_height),
+                        *paper(horizontal, model.block_top), LAYER_OUTLINE))
 
 
 def _draw_load(figure: Figure, paper: _Paper, model: ElevationModel) -> None:
@@ -476,7 +471,7 @@ def _draw_load(figure: Figure, paper: _Paper, model: ElevationModel) -> None:
                     layer=LAYER_THIN))
 
     # 吊索：吊钩中心 → 吊物两上角（粗红线）
-    hook = paper(x, model.hook_h)
+    hook = paper(*model.hook_seat)
     for corner in ((x - half, top), (x + half, top)):
         c = paper(*corner)
         figure.add(Line(x1=hook[0], y1=hook[1], x2=c[0], y2=c[1], layer=LAYER_RIGGING))
@@ -563,13 +558,13 @@ def _draw_markers(figure: Figure, paper: _Paper, model: ElevationModel) -> None:
 
     hook_x, hook_y = paper(model.radius, model.hook_h)
     # 吊钩中心：文字在钩左侧，引线指向吊钩组
-    D.leader(figure, (hook_x - 0.3, hook_y + BLOCK_GAP + BLOCK_H / 2),
+    D.leader(figure, (hook_x, hook_y),
              (hook_x - 9.0, hook_y + 3.4), "吊钩中心", align=ALIGN_RIGHT)
 
     # 主臂：文字在臂上侧，引线指向臂中段
     mid = 0.55
     rad = model.rad
-    mx = model.boom_len * mid * math.cos(rad) - math.sin(rad) * _boom_half(mid)
+    mx = model.hinge[0] + model.boom_len * mid * math.cos(rad) - math.sin(rad) * _boom_half(mid)
     my = HINGE_H + model.boom_len * mid * math.sin(rad) + math.cos(rad) * _boom_half(mid)
     target = paper(mx, my)
     D.leader(figure, target, (target[0] - 12.0, target[1] + 6.0), "主臂",
@@ -587,7 +582,7 @@ def _geometry(model: ElevationModel, scale: float, derived_angle: bool,
     """只画立面几何（不含图框/标题栏/表格），用于按实际外包框排版。"""
     canvas = Figure(title="", width=0.0, height=0.0)
     paper = _Paper(scale=scale, ox=0.0, oy=0.0)
-    draw_truck(canvas, paper, axles)
+    draw_truck(canvas, paper, axles, model.hinge)
     _draw_boom(canvas, paper, model)
     _draw_rope(canvas, paper, model)
     _draw_hook_block(canvas, paper, model)

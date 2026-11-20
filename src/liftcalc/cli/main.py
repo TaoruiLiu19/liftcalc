@@ -41,7 +41,7 @@ def _load_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _dump(result: ComputationResult, out: Path | None) -> None:
+def _emit_result(result: ComputationResult, out: Path | None) -> None:
     payload = result.model_dump(mode="json")
     text = json.dumps(payload, ensure_ascii=False, indent=2)
     if out is None:
@@ -50,6 +50,11 @@ def _dump(result: ComputationResult, out: Path | None) -> None:
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(text, encoding="utf-8")
         typer.echo(f"已写入 {out}")
+    if result.verdict is Verdict.FAIL:
+        raise typer.Exit(1)
+    if result.kind == "crane.capability" and result.verdict is Verdict.NA:
+        typer.echo(f"资料不足：{result.aux['capability']['explanation']}", err=True)
+        raise typer.Exit(6)
 
 
 def _version_callback(value: bool) -> None:
@@ -79,9 +84,7 @@ def calc(
     except LiftcalcError as exc:
         _fail(exc)
         return
-    _dump(result, out)
-    if result.verdict is Verdict.FAIL:
-        raise typer.Exit(1)
+    _emit_result(result, out)
 
 
 @app.command("report")
@@ -197,7 +200,9 @@ def capability_cmd(
     second_brand: str = typer.Option("徐工", "--second-brand"),
     left_share: float = typer.Option(0.6, "--left-share", help="主吊承担比例"),
     asynchronism: float = typer.Option(1.0, "--asynchronism", help="不同步系数"),
-    required_height: float | None = typer.Option(None, "--required-height", help="所需起升高度 m"),
+    target_radius: float | None = typer.Option(None, "--target-radius", "--radius", help="单机指定作业幅度 m"),
+    config: str | None = typer.Option(None, "--config", help="限定单机性能表配置，传入完整配置名"),
+    required_height: float | None = typer.Option(None, "--required-height", help="单机所需起升高度 m"),
     load_width: float = typer.Option(3.2, "--load-width", help="图示吊物宽 m（只影响立面图）"),
     load_height: float = typer.Option(3.8, "--load-height", help="图示吊物高 m（只影响立面图）"),
     clearance: float = typer.Option(1.0, "--clearance", help="图示吊物底距地净空 m（只影响立面图）"),
@@ -216,6 +221,8 @@ def capability_cmd(
         "crane": {"brand": brand, "model": model},
         "left_share": left_share,
         "asynchronism": asynchronism,
+        "target_radius": target_radius,
+        "config": config,
         "load_width_m": load_width,
         "load_height_m": load_height,
         "clearance_m": clearance,
@@ -231,9 +238,7 @@ def capability_cmd(
     except LiftcalcError as exc:
         _fail(exc)
         return
-    _dump(result, out)
-    if result.verdict is Verdict.FAIL:
-        raise typer.Exit(1)
+    _emit_result(result, out)
 
 @app.command("render")
 def render_png_cmd(

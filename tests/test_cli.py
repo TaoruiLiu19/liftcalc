@@ -11,6 +11,7 @@ from typer.testing import CliRunner
 from liftcalc.cli.main import app
 
 PACK = Path(__file__).resolve().parents[1] / "src" / "liftcalc" / "data" / "pack"
+DB = Path(__file__).resolve().parents[1] / "data" / "liftcalc.sqlite"
 runner = CliRunner()
 
 EYE_CASE = {
@@ -48,6 +49,48 @@ def test_fail_verdict_exits_one(workdir: Path) -> None:
     case_path.write_text(json.dumps(overloaded, ensure_ascii=False), encoding="utf-8")
     outcome = runner.invoke(app, ["calc", "--in", str(case_path), "--out", str(workdir / "over_result.json")])
     assert outcome.exit_code == 1
+
+
+def test_insufficient_hook_data_exits_six_for_both_commands(tmp_path: Path) -> None:
+    case = {"kind": "crane.capability", "crane": {"brand": "三一", "model": "STC750"}, "payload": 10}
+    case_path = tmp_path / "case.json"
+    case_path.write_text(json.dumps(case), encoding="utf-8")
+    result_path = tmp_path / "result.json"
+    calc = runner.invoke(app, ["calc", "--in", str(case_path), "--out", str(result_path), "--db", str(DB)])
+    capability = runner.invoke(app, ["capability", "--model", "STC750", "--brand", "三一",
+                                     "--payload", "10", "--db", str(DB)])
+    for outcome in (calc, capability):
+        assert outcome.exit_code == 6
+        assert "资料不足" in outcome.stderr and "缺吊钩自重" in outcome.stderr
+    assert json.loads(capability.stdout)["verdict"] == json.loads(result_path.read_text("utf-8"))["verdict"] == "N/A"
+
+
+@pytest.mark.parametrize(("radius", "height", "code", "verdict"), [
+    ("6", "9", 0, "PASS"), ("6", "10", 1, "FAIL"), ("5.5", "9", 6, "N/A"),
+])
+def test_cli_checks_radius_and_height_on_selected_boom(radius, height, code, verdict):
+    result = runner.invoke(app, ["capability", "--model", "QY70K-1", "--payload", "10",
+                                 "--config", "主臂11.6m", "--radius", radius, "--required-height", height,
+                                 "--db", str(DB)])
+    assert result.exit_code == code, result.output
+    data = json.loads(result.stdout)
+    assert data["verdict"] == verdict
+    cap = data["aux"]["capability"]
+    assert cap["target_radius"] == float(radius)
+    assert [(r["config"], r["radius"]) for r in cap["records"]] == [("主臂11.6m", 6)]
+
+
+def test_numeric_result_without_a_safety_verdict_still_exits_zero(tmp_path: Path) -> None:
+    path = tmp_path / "sphere.json"
+    path.write_text(json.dumps({"kind": "geometry.centroid", "solids": [{"type": "sphere", "dims": {"d": 10}}]}))
+    outcome = runner.invoke(app, ["calc", "--in", str(path)])
+    assert outcome.exit_code == 0 and json.loads(outcome.stdout)["verdict"] == "N/A"
+
+
+def test_dual_rejects_unsupported_height_constraint() -> None:
+    result = runner.invoke(app, ["capability", "--mode", "dual", "--model", "QY70K-1", "--payload", "10",
+                                 "--required-height", "9", "--db", str(DB)])
+    assert result.exit_code == 2 and "仅适用于单机" in result.stderr
 
 
 def test_report_and_draw(workdir: Path) -> None:

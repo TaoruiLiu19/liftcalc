@@ -3,7 +3,7 @@
 轮廓按参考图的像素坐标描点（`docs/handover/assets/原版吊装立面-汽车吊.png` 的车身），
 所以形状与素材一致，但**矢量化**——放大不发虚，DXF 里也有车身。
 
-轴数为吨级示意（≤100 t 五轴、100–300 t 六轴、≥300 t 八轴），轮胎按真实直径画，
+轴数为吨级示意（≤100 t 四轴、100–300 t 六轴、≥300 t 八轴），轮胎按真实直径画，
 不是厂商的轴距/轴荷数据。坐标同样走 ``paper``（模型 m → 图面 mm），与立面几何严格对齐。
 """
 
@@ -24,9 +24,10 @@ MODEL_REAR = 3.45                      # 车尾（参考图 x=64 px）距回转�
 BODY_MODEL_FRONT = TRACE_M - MODEL_REAR  # 车头前沿距回转中心 = 9.55 m
 GROUND_PX = 328.0                      # 参考图上地面线的 y
 WHEEL_R = 0.64                         # 轮胎半径（按参考图轮拱约 1.28 m 直径）
+RAM_BASE = (MODEL_REAR - (309 - 64) / PX_PER_M, (GROUND_PX - 166) / PX_PER_M)
 
 # 每个轴数的轴距范围（参考图 px），取够放下 n 个 1.28 m 轮胎且不互相盖住
-AXLE_SPANS = {5: (209.0, 726.0), 6: (196.0, 784.0), 8: (168.0, 862.0)}
+AXLE_SPANS = {4: (209.0, 726.0), 5: (209.0, 726.0), 6: (196.0, 784.0), 8: (168.0, 862.0)}
 DEFAULT_AXLES = 5
 
 
@@ -46,7 +47,7 @@ def axle_count(tonnage: float | None) -> int | None:
     if tonnage is None or tonnage <= 0:
         return None
     if tonnage <= 100:
-        return 5
+        return 4
     return 8 if tonnage >= 300 else 6
 
 
@@ -68,7 +69,7 @@ def axle_stations(count: int | None) -> tuple[float, ...]:
     return tuple(low + step * index for index in range(count))
 
 
-def draw_truck(figure: Figure, paper, axles: int | None) -> None:
+def draw_truck(figure: Figure, paper, axles: int | None, hinge: tuple[float, float]) -> None:
     """按参考图描点画车身；轮胎用真实圆，半径不随轴数变化。"""
 
     def point(horizontal: float, vertical: float) -> tuple[float, float]:
@@ -141,11 +142,12 @@ def draw_truck(figure: Figure, paper, axles: int | None) -> None:
     detail((495, 121), (495, 173))
     contour(((313, 147), (443, 92), (478, 89), (483, 100), (331, 162),
              (324, 180), (299, 180)))
-    figure.add(Circle(*point(309, 166), 0.11 * paper.s, LAYER_OUTLINE))
     # 臂架搁架 + 铰点（接到模型铰点，保证与臂架对齐）
     contour(((383, 107), (383, 81), (455, 81), (468, 70), (616, 70),
              (619, 113), (532, 113), (519, 106), (487, 106), (472, 115)))
     figure.add(Circle(*point(561, 94), 0.16 * paper.s, LAYER_THIN))
-    hinge = paper(0.0, 4.7)
-    figure.add(Polyline((point(296, 150), hinge, point(382, 134)), False, LAYER_OUTLINE))
-    figure.add(Circle(*hinge, 0.13 * paper.s, LAYER_OUTLINE))
+    pin_x, pin_y = hinge
+    saddle = (point(455, 81), paper(pin_x - .29, pin_y + .08),
+              paper(pin_x - .14, pin_y + .29), paper(pin_x + .17, pin_y + .29),
+              paper(pin_x + .30, pin_y + .06), point(383, 107))
+    figure.add(Polyline(saddle, True, LAYER_OUTLINE))
