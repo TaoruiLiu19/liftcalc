@@ -8,16 +8,12 @@ import {
   ref,
   watch,
 } from 'vue'
+import SheetViewer from './SheetViewer.vue'
 import type { Snapshot, Cell, Model } from './types'
 const CadPane = defineAsyncComponent(() => import('./CadPane.vue'))
 const theme = ref('refract')
 watch(theme, value => { document.documentElement.dataset.theme = value }, { immediate: true })
-const sheetDialog = ref<HTMLDialogElement>()
-const sheetZoom = ref(1)
-function enlargeSheet() {
-  sheetZoom.value = 1
-  sheetDialog.value?.showModal()
-}
+const sheetViewer = ref<InstanceType<typeof SheetViewer>>()
 const models = ref<Model[]>([]),
   snapshot = ref<Snapshot | null>(null),
   busy = ref(false),
@@ -261,7 +257,7 @@ async function save(fmt: string) {
           </button>
         </nav>
         <div v-show="tab === 'sheet'" class="paper">
-          <button v-if="snapshot?.svg" class="sheet-open" aria-label="放大吊装示意图" title="放大吊装示意图" @click="enlargeSheet" v-html="snapshot.svg"></button>
+          <button v-if="snapshot?.svg" class="sheet-open" aria-label="放大吊装示意图" title="放大吊装示意图" @click="sheetViewer?.open()" v-html="snapshot.svg"></button>
           <p v-else>尚无可显示的工况立面</p>
         </div>
         <CadPane v-if="usedCad" v-show="tab === 'cad'" :snapshot="snapshot" />
@@ -353,14 +349,6 @@ async function save(fmt: string) {
       </div>
     </details>
     <footer>仅供学习与专业复核，不作为工程实施依据。</footer>
-    <dialog v-if="snapshot?.svg" ref="sheetDialog" class="sheet-dialog" aria-label="吊装示意图放大查看">
-      <div class="sheet-bar"><strong>吊装示意图</strong>
-        <button aria-label="缩小" :disabled="sheetZoom <= 1" @click="sheetZoom -= 0.5">−</button>
-        <button title="适合窗口" @click="sheetZoom = 1">{{ sheetZoom * 100 }}%</button>
-        <button aria-label="放大" :disabled="sheetZoom >= 4" @click="sheetZoom += 0.5">＋</button>
-        <button autofocus @click="sheetDialog?.close()">关闭</button>
-      </div>
-      <div class="sheet-scroll"><div :style="{width: sheetZoom * 100 + '%', height: sheetZoom * 100 + '%'}" v-html="snapshot.svg"></div></div>
-    </dialog>
+    <SheetViewer v-if="snapshot?.svg" ref="sheetViewer" :svg="snapshot.svg" />
   </main>
 </template>

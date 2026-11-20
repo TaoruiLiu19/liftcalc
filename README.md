@@ -10,7 +10,7 @@
 
 ![单机吊装工作台，QY70K-1 查表与四轴立面](docs/handover/assets/refract-single.png)
 
-工作台默认使用 Refract 浅色主题，右上角可切换 Dusk 深色主题。点击吊装示意图可打开大图，使用 ＋、− 查看局部细节，按 Esc 或点击“关闭”返回。
+工作台默认使用 Refract 浅色主题，右上角可切换 Dusk 深色主题。点击吊装示意图可打开大图，在图上滚动滚轮可围绕指针缩放（100%–400%），按住左键可手型拖动。点击百分比可恢复全图，按 Esc 或点击“关闭”返回。
 
 [查看只读 CAD 核图界面](docs/handover/assets/refract-cad.png)
 
