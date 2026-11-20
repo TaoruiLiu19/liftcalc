@@ -8,22 +8,47 @@
 
 ## Windows 单机桌面工作台
 
-![单机吊装工作台，QY70K-1 查表与四轴立面](docs/handover/assets/refract-single.png)
+![吊装工作台首屏：吊物三维货物图与重心输入](docs/handover/assets/refract-single.png)
+
+![计算结果：A3 立面图、吊物与吊索表](docs/handover/assets/refract-result.png)
 
 工作台默认最大化，左侧输入工况并查看结果，右侧查看及导出图纸。默认使用 Refract 浅色主题，右上角可切换 Dusk 深色主题。点击吊装示意图可打开大图，在图上滚动滚轮可围绕指针缩放（100%–400%），按住左键可手型拖动。点击百分比可恢复全图，按 Esc 或点击“关闭”返回。
 
 [查看只读 CAD 核图界面](docs/handover/assets/refract-cad.png)
 
-在安装 Python 3.12 或更高版本、Microsoft Edge WebView2 运行时的 Windows 电脑上，双击仓库根目录的 `启动单机工作台.cmd`。首次启动会在项目的 `.venv` 中安装桌面依赖，需要联网。以后可离线启动。界面和 CAD 资源随仓库提供。
+在安装 Python 3.12 或更高版本的 Windows 电脑上，双击仓库根目录的 `启动单机工作台.cmd`。首次启动会在项目的 `.venv` 里装 `bottle`/`pillow`（需要联网），以后可离线启动。界面和 CAD 资源随仓库提供。
 
-1. 在左栏选择机型和配置，输入吊件、索具重量。核对“实车主钩”显示的额载和自重，有多种主钩时可直接切换。手动填写时使用铭牌自重，单位为吨。按最远幅度或指定幅度查表，可同时约束钩高。
-2. 点击“计算并生成图纸”，在左栏查看采用幅度、臂长、起升高度和负荷率。编辑工况后请重新计算。
-3. “CAD 核图”支持本次 DXF 和 32 MB 以内的本地 DXF。按住鼠标左键平移，滚动滚轮缩放，点击“全图”恢复视野。
-4. 可导出 DXF、SVG、PNG 或 Word 复核报告。图示轴数、车辆外形及净空用于表达工况，工程尺寸以厂家资料为准。
+**窗口怎么来**：默认就是**原来的 .NET 原生窗口**（pywebview + WebView2）。如果这台机器起不来 .NET 宿主或 WebView2（35 秒内窗口没出来），同一个进程里会自动改成 Edge/Chrome 的 `--app` 独立窗口（没有地址栏、没有标签页），界面完全一样。
 
-工作台采用 Vue 3、TypeScript、pywebview 和现有 Python 计算内核。修改界面后在 `frontend` 目录运行 `pnpm install --frozen-lockfile` 和 `pnpm run build`，将生成的 `src/liftcalc/dusk_static` 随源码一起提交。已安装桌面扩展的环境也可以运行 `python -m liftcalc.dusk`。
+| `LIFTCALC_UI` | 行为 |
+|---|---|
+| `auto`（默认） | 先开 pywebview 原生窗口；失败/超时就退回独立窗口 |
+| `app` | 直接用 Edge/Chrome 独立窗口（跳过 .NET） |
+| `browser` | 默认浏览器的标签页 |
+| `native` | 只试原生窗口；失败会弹窗说明，再退回独立窗口 |
 
-桌面端提供单机复核。双机按比例分载使用下方 CLI 的 `--mode dual`。前端源码在 `frontend/src`，CAD 查看器及文字渲染 worker 的版本由 `frontend/pnpm-lock.yaml` 锁定。本次重建使用 Node.js 24.22.3 和 pnpm 11.25.0。
+- 关掉窗口后约 1 分钟进程自动退出，不会一直占端口。
+- `set LIFTCALC_NO_BROWSER=1` 只起服务不开窗口（地址写在 `%TEMP%\liftcalc-url.txt`）。
+- 启动失败会把完整 traceback 写到 `%TEMP%\liftcalc-error.log`；脚本装依赖失败时会停住并提示。
+- **中文项目路径的坑**：.NET Framework 会把 `D:\学习日志\...` 这种非 ASCII 路径上的程序集当成"网络位置"而拒绝加载（`NotSupportedException 0x80131515`）。程序启动时会自动给 `python.exe` / `pythonw.exe` 旁边补一个含 `loadFromRemoteSources` 的 `*.exe.config`（已有的配置不会覆盖）；写不进去时会把 `pythonnet`/`webview` 复制到 ASCII 目录再从那里导入。
+
+界面按三步走：**吊物 → 吊装方式 → 车型**。
+
+1. **吊物**：填长（沿幅度方向）、宽（垂直立面）、高和重量，右侧立刻按真实尺寸画出带坐标系的**三维货物图**（按住可旋转）。再填重心相对形心的坐标 ex / ey / ez，图上用形心符号标出。吊索高度、吊点内缩和吊物底净空在“吊索与净空”里改。
+2. **吊装方式**：单机（可用）／双机抬吊（后端与计算书已实现，按重心分载、缺重心退回 60/40；界面暂未开放）。
+3. **车型**：选机型、性能表配置、实车主钩和索具，按最远幅度或指定幅度查表。核对“实车主钩”显示的额载与自重，手动填写时用铭牌自重（吨）。点击“计算并生成图纸”，左栏查看采用幅度、臂长、所需起升高度、最大索力和负荷率。编辑工况后请重新计算。
+4. “CAD 核图”支持本次 DXF 和 32 MB 以内的本地 DXF。按住鼠标左键平移，滚动滚轮缩放，点击“全图”恢复视野。
+5. 可导出 DXF、SVG、PNG 或 Word 复核报告。图示轴数、车辆外形用于表达工况，工程尺寸以厂家资料为准。
+
+工作台采用 Vue 3、TypeScript 和现有 Python 计算内核，宿主 `src/liftcalc/dusk.py` 同时支持 pywebview 原生窗口和浏览器模式（浏览器模式把 `window.pywebview.api` 桥成同源的 `/api/*` 请求，导出走下载）。修改界面后在 `frontend` 目录运行 `pnpm install --frozen-lockfile` 和 `pnpm run build`，将生成的 `src/liftcalc/dusk_static` 随源码一起提交。也可以直接运行：
+
+```powershell
+$env:PYTHONPATH='src'
+.\.venv\Scripts\python.exe -m liftcalc.dusk                      # 自动
+$env:LIFTCALC_UI='browser'; .\.venv\Scripts\python.exe -m liftcalc.dusk   # 强制浏览器
+```
+
+桌面端提供单机复核。双机抬吊（按重心分载）使用下方 CLI 的 `--mode dual`。前端源码在 `frontend/src`，CAD 查看器及文字渲染 worker 的版本由 `frontend/pnpm-lock.yaml` 锁定。本次重建使用 Node.js 24.22.1 和 pnpm 11.22.0。
 
 ## 一、它能回答什么问题
 
@@ -62,6 +87,8 @@
 | 查表方式 | **取下一档，绝不插值**（原厂说明第 7 条） |
 | 计算荷载 | 吊件 + 吊钩 + 索具 × 动载系数（默认 1.1） |
 | 吊钩自重 | 优先采用该车型已核实的默认主钩。没有默认值时，选择实车主钩或输入铭牌自重。 |
+| 双机负荷分配 | **按重心在两吊点间的位置分载**；未给重心时退回 60/40 兜底 |
+| 所需起升高度 | **净空 + 吊物高 + 吊索竖直高度** 推算，不再手工填 |
 | 查不到 | 明确报"无性能数据"，**不会给半截答案** |
 
 > **"最远"是怎么来的**：把该机型所有"臂长 × 幅度"格子逐个试，算出负荷率，取满足条件且幅度最大的那一格。
@@ -99,12 +126,18 @@ pip install pint numpy pydantic python-docx ezdxf typer PyYAML pytest hypothesis
 # 单机：10 吨货，QY70K-1
 .\liftcalc.ps1 capability --model QY70K-1 --payload 10 --hook 0.616 --rigging 0.3 --out out\cap.json
 
-# 单机：用 11.6 m 主臂核对 6 m 幅度、9 m 钩高
-.\liftcalc.ps1 capability --model QY70K-1 --payload 10 --config "主臂11.6m" --target-radius 6 --required-height 9
+# 单机：6×3×2.5 m、10 t 的吊物，重心偏形心 (+0.4, +0.2, +0.3) m，吊索高 3.5 m
+.\liftcalc.ps1 capability --model QY70K-1 --payload 10 --hook 0.616 --rigging 0.3 `
+    --load-length 6 --load-depth 3 --load-height 2.5 `
+    --cg-x 0.4 --cg-y 0.2 --cg-z 0.3 --sling-height 3.5 --out out\cap.json
 
-# 双机：两台 QY70K-1 抬 20 吨，60/40 分配，不同步系数 1.1
+# 单机：用 11.6 m 主臂核对 6 m 幅度（钩高由吊物推算；也可 --required-height 手动覆盖）
+.\liftcalc.ps1 capability --model QY70K-1 --payload 10 --config "主臂11.6m" --target-radius 6
+
+# 双机：两台 QY70K-1 抬 20 吨，按重心分载（重心偏 +x 1.2 m），不同步系数 1.1
 .\liftcalc.ps1 capability --mode dual --model QY70K-1 --second-model QY70K-1 `
-    --payload 20 --hook 0.616 --rigging 0.5 --asynchronism 1.1 --out out\dual.json
+    --payload 20 --hook 0.616 --rigging 0.5 --asynchronism 1.1 `
+    --load-length 8 --load-depth 3 --load-height 2 --cg-x 1.2 --out out\dual.json
 ```
 
 参数说明：
@@ -118,9 +151,16 @@ pip install pint numpy pydantic python-docx ezdxf typer PyYAML pytest hypothesis
 | `--limit` | 负荷率上限 | 单机 0.90 / 双机 0.80 |
 | `--target-radius` / `--radius` | 单机指定作业幅度 m。介于两档时用较大幅度档核载 | 查最远幅度 |
 | `--config` | 单机配置全名，可从结果的 `aux.capability.records[].config` 读取 | 比较全部配置 |
-| `--required-height` | 单机所需起升高度 m。同时指定幅度时，须有该位置的钩高数据 | 仅校核载荷 |
-| `--load-width` / `--load-height` | 图示吊物宽/高 m | 3.2 / 3.8（只影响立面图） |
-| `--clearance` | 图示吊物底距地净空 m | 1.0（只影响立面图） |
+| `--required-height` | 手动覆盖所需起升高度 m。不给时由吊物高 + 吊索高推算 | 推算值 |
+| `--load-length`（别名 `--load-width`）/ `--load-depth` / `--load-height` | 吊物长（立面内）/ 宽（垂直立面）/ 高 m | 3.2 / 3.2 / 3.8 |
+| `--cg-x` / `--cg-y` / `--cg-z` | 重心相对形心的偏移 m（x 指向远离吊车，z 向上） | 0 / 0 / 0 |
+| `--sling-height` | 吊索竖直高度 m（吊钩中心到吊点平面） | 按最短索与水平成 60° 推算 |
+| `--lug-inset` | 吊点自顶面四角向内收进 m | 0 |
+| `--dual-left-x` / `--dual-right-x` | 双机两吊点在吊物上的 x 坐标 m | ±长/2 |
+| `--clearance` | 吊物底距地净空 m | 1.0 |
+
+> 给了 `--load-*` 或 `--cg-*` 才会启用"吊物真实几何"：推算所需起升高度、四索夹角与受力、双机按重心分载。
+> 不给时保持旧行为（2D 示意尺寸，双机按 60/40）。
 
 `capability` 和 `calc` 的退出码如下。带 `--out` 时，退出码 0、1、6 都会写入结果 JSON。退出码 6 的具体原因另写入标准错误。
 
@@ -140,7 +180,7 @@ pip install pint numpy pydantic python-docx ezdxf typer PyYAML pytest hypothesis
 .\liftcalc.ps1 report --in out\cap.json --out out\吊装计算书.docx
 ```
 
-计算书包含：计算依据、设计参数、反查结论、临界工况、**详细计算过程**（荷载组成 / 逐臂长扫描 / 临界格算术）、结果汇总、结论、输入一览。
+计算书包含：计算依据、设计参数、**吊物与重心**（真实尺寸 / 重心偏心 / 四索夹角与受力 / 双机分载）、反查结论、临界工况、**详细计算过程**（荷载组成 / 逐臂长扫描 / 临界格算术）、结果汇总、结论、输入一览。
 
 ### 3.5 出图
 
@@ -157,9 +197,11 @@ pip install pint numpy pydantic python-docx ezdxf typer PyYAML pytest hypothesis
 
 - **图幅**：A3，竖幅/横幅**自动选**（谁的比例大用谁），图框 + 分区 1–8 / A–H
 - **立面**：汽车吊、伸缩臂（含搭接分界）、变幅油缸、臂端滑轮组、起升绳、吊钩组、吊索、吊物
-- **尺寸链**：R / f / g（地面以下）、H / Hz / h1–h3（吊物左侧）、h0（吊钩到臂端）、L（沿臂）、a（仰角弧）、E（铰点高），全部带尺寸界线与箭头
-- **引线标注**：吊钩中心、主臂、索具、回转中心
-- **图面**：右上起重性能表、右下标题栏（含设计/校核/审核/批准）、左下说明 5–6 条
+- **吊物**：按真实长×高绘制，顶面画吊点、底部注宽度方向；重心用**形心符号**（圆 + 对角象限阴影）标出，并随重心偏心移动
+- **尺寸链**：R / f / g（地面以下）、H / Hz / h1–h3（吊物左侧）、h0（吊钩到臂端）、L（沿臂）、a（仰角弧）、θ（立面内吊索夹角）、E（铰点高），全部带尺寸界线与箭头
+- **引线标注**：吊钩中心、主臂、索具、重心、回转中心
+- **图面**：右上起重性能表 + 吊物与吊索表（长宽高 / 重心偏心 / 四索夹角与索力 / 所需起升高度）、右下标题栏、左下说明
+- **另出**：吊物与重心**三维轴测图**（坐标轴 x/y/z、四根吊索、吊钩、形心符号）
 
 比例是**真实的**：按内容外包框在标准比例梯 1:50 / 1:100 / 1:150 / 1:200 … 里取最大可容的一档，
 所以标题栏、说明里写的比例与图上量出来的一致（过去写死 1:100，实际是 1:131）。
@@ -250,7 +292,9 @@ pip install pint numpy pydantic python-docx ezdxf typer PyYAML pytest hypothesis
 | 模块 | 状态 |
 |---|---|
 | 能力反查、双机抬吊 | ✅ 使用中 |
+| 吊物几何与重心 `lifting.load_geometry`（四索受力 / 起升高度 / 双机分载） | ✅ 使用中 |
 | 计算书、出图 | ✅ 使用中 |
+| 双机抬吊的桌面界面 | ⏸ 接口与计算已完成，界面禁用 |
 | 吊耳 `lifting.eye`、吊梁 `lifting.beam`、索具 `lifting.rigging` | ⏸ 暂不使用 |
 | 截面 `sections`、重心 `geometry` | ⏸ 暂不使用 |
 | 平面框架 `fea`、规范校核 `codecheck` | ⏸ 暂不使用 |
@@ -260,6 +304,23 @@ pip install pint numpy pydantic python-docx ezdxf typer PyYAML pytest hypothesis
 ---
 
 ## 六、常见问题
+
+**双击 `启动单机工作台.cmd` 没反应 / 只闪一下**
+
+先看 `%TEMP%\liftcalc-error.log`（启动失败会写），以及 `%TEMP%\liftcalc-url.txt`（服务地址）。三个常见原因：
+
+1. **依赖没装上**：脚本会自己跑 `pip install --no-cache-dir bottle pillow`，失败时会停住并打印命令，照着手动跑一遍即可。
+2. **原生窗口起不来**（缺 WebView2、中文路径下 .NET 加载被拒）：35 秒内没出窗口会自动换独立窗口；`%TEMP%\liftcalc-error.log` 里会写原因。想强制用独立窗口：`set LIFTCALC_UI=app`。
+3. **没有 Edge/Chrome**：独立窗口开不了会退回默认浏览器；两者都没有时弹窗给出地址，手动打开即可。
+4. **.venv 是用旧 Python 建的**：删掉 `.venv` 重新双击。
+
+命令行排查：
+
+```powershell
+$env:PYTHONPATH='src'
+.\.venv\Scripts\python.exe -c "import bottle, PIL, liftcalc.dusk; print('ok')"
+.\.venv\Scripts\python.exe -m liftcalc.dusk
+```
 
 **查某机型报"没有性能数据"**
 该机型没录入（见 4.2），或数据库没建（先跑 `data build`）。
@@ -288,11 +349,12 @@ src/liftcalc/
   crane/capability.py   反查核心
   data/                 机型表读写、校验、导入
   services/calc.py      工况 JSON → 结果 JSON
+  lifting/load_geometry.py  吊物尺寸/重心/四索受力/起升高度/双机分载
   report/render.py      Word 计算书
-  drawing/              绘图（primitives / style / dim / sheet / body / figures / svg / dxf / png）
+  drawing/              绘图（primitives / style / dim / sheet / body / figures / load3d / svg / dxf / png）
 data/pack/crane/        机型表 CSV（数据源，手工维护）
 tools/                  转录、PDF 提取、DXF 预览、PNG 渲染
-tests/                  138 个测试函数（含 test_drawing.py 的立面图断言）
+tests/                  15 个测试文件（含 test_drawing.py 立面图断言、test_load_geometry.py）
 docs/handover/          交接文档（含原版参照图与待办）
 ```
 
@@ -301,8 +363,12 @@ docs/handover/          交接文档（含原版参照图与待办）
 ## 八、限制与免责
 
 - 当前覆盖 **15 款汽车吊、1 款全地面起重机，共 4063 个主臂格点**。
-- 立面图是**能力反查示意图**：吊物按方框示意，车身、臂架为简化线稿，不是施工图
-- 未做风载、偏心、多机不同步的动力分析，只用系数简化
+- 立面图的**吊物按真实长×高绘制**、重心位置按输入坐标标注；车身、臂架仍是简化线稿，不是施工图
+- 四根吊索的夹角与索力按**静力线分配**（`R=W/4·(1±2ex/Lx)·(1±2ey/Ly)`、`T=R/cosθ`）计算，
+  假定吊钩位于四吊点形心正上方、吊物保持水平。重心偏心时吊物实际会倾斜到重心位于吊钩正下方，
+  倾斜量和调平由现场倒链解决——这一点写在计算书里，不要当成精确受力分析
+- 双机分载按重心在两吊点之间的杠杆关系计算，未计两台吊车的不同步动力作用（只用不同步系数放大）
+- 未做风载、多机不同步的动力分析，只用系数简化
 - 原厂表只给**支腿全伸**工况
 - 计算书里的"限值"（负荷率 90%/80% 等）是**工程惯例取值，待专家核定**
 - 本工具为个人学习与复核参考，**输出不得作为工程实施依据**

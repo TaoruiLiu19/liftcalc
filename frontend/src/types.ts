@@ -1,10 +1,42 @@
 export type MainHook = { mass_t: number; rated_t: number; is_default: number }
 export type Model = { brand: string; model: string; config: string; hook_main_t: number | null; main_hooks: MainHook[] }
+export type Sling = {
+  index: number
+  name: string
+  x: number
+  y: number
+  run: number
+  length: number
+  angle_deg: number
+  share: number
+  force_t: number
+}
+export type LoadSummary = {
+  length_m: number
+  width_m: number
+  height_m: number
+  clearance_m: number
+  weight_t: number
+  cg: { x: number; y: number; z: number }
+  lug_inset_m: number
+  sling_height_m: number
+  sling_height_derived: boolean
+  slings: Sling[]
+  max_force_t: number
+  min_force_t: number
+  max_angle_deg: number
+  min_angle_deg: number
+  required_lift_height_m: number
+  hook_height_m: number
+  height_source: string
+  notes: string[]
+}
 export type Snapshot = {
   id: string
   svg: string | null
   scale: number | null
   warnings: string[]
+  load: LoadSummary | null
   cap: {
     model: string
     config: string | null

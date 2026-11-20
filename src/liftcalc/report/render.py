@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +29,9 @@ _CHECK_TITLES = {
     "capability.left": "主吊（左机）",
     "capability.right": "辅吊（右机）",
     "capability.shortfall": "最接近工况与缺口",
+    "load.cg": "吊物重心（相对形心）",
+    "load.sling": "四根吊索夹角与受力",
+    "dual.split": "双机负荷分配",
 }
 
 
@@ -114,7 +118,11 @@ _PARAM_VALUES = {
     "dual": "双机抬吊",
 }
 
-_SKIP_PREFIX = ("units.", "meta.")
+# 吊物/双机几何在「吊物与重心」一节里按中文表格展开，设计参数表不再重复
+_SKIP_PREFIX = ("units.", "meta.", "load.", "dual.")
+
+#: 这些 check 的数值在「吊物与重心」一节里成表展开，计算过程不再逐项重复
+_LOAD_CHECK_IDS = ("load.cg", "load.sling", "dual.split")
 
 
 _DUAL_ONLY = ("left_share", "asynchronism", "second.brand", "second.model")
@@ -137,6 +145,119 @@ def _param_rows(payload: dict) -> list[list[str]]:
             text_value = f"{int(value)}"
         rows.append([label, text_value])
     return rows
+
+
+def _has_load_section(load: dict[str, Any]) -> bool:
+    return bool(load.get("length_m"))
+
+
+def _load_section(document: Document, load: dict[str, Any], cap: dict[str, Any],
+                  number: int) -> None:
+    """「吊物与重心」一节：真实尺寸、重心偏心、四索夹角与受力、双机分载。"""
+    document.add_heading(f"3.{number} 吊物与重心", level=2)
+    document.add_paragraph(
+        "吊物按长方体处理，形心在体心。重心坐标以形心为原点：x 沿吊物长度方向、"
+        "指向远离吊车；y 沿宽度方向；z 竖向向上。四个吊点位于顶面四角，可向内收进。"
+    )
+    length = float(load["length_m"])
+    width = float(load["width_m"])
+    height = float(load["height_m"])
+    cg = load.get("cg") or {}
+    ex, ey, ez = (float(cg.get(key) or 0.0) for key in ("x", "y", "z"))
+    sling_h = float(load.get("sling_height_m") or 0.0)
+    derived = bool(load.get("sling_height_derived"))
+    required = float(load.get("required_lift_height_m") or 0.0)
+    clearance = float(load.get("clearance_m") or 0.0)
+    inset = float(load.get("lug_inset_m") or 0.0)
+    _add_table(
+        document,
+        ["项目", "取值"],
+        [
+            ["吊物外形（长×宽×高）", f"{length:.2f} × {width:.2f} × {height:.2f} m"],
+            ["吊物重量", f"{float(load.get('weight_t') or 0):.2f} t"],
+            ["形心位置", "体心（长方体几何中心）"],
+            ["重心相对形心", f"ex = {ex:+.2f} m，ey = {ey:+.2f} m，ez = {ez:+.2f} m"],
+            ["水平偏心", f"{math.hypot(ex, ey):.2f} m"],
+            ["吊点内缩", f"{inset:.2f} m"],
+            [
+                "吊索竖直高度",
+                f"{sling_h:.2f} m"
+                + ("（按最短索与水平成 60° 推算）" if derived else "（按要求输入）"),
+            ],
+            [
+                "所需起升高度",
+                f"{required:.2f} m（净空 {clearance:.2f} + 吊物高 {height:.2f} + "
+                f"吊索高 {sling_h:.2f}）",
+            ],
+        ],
+    )
+
+    slings = load.get("slings") or []
+    if slings:
+        document.add_paragraph(
+            "四根吊索的几何与受力（竖向反力按重心线分配，索力 = 竖向反力 / cosθ，"
+            "未乘动载系数）："
+        )
+        _add_table(
+            document,
+            ["索号", "位置", "水平跨距 (m)", "与竖直夹角 (°)", "竖向分载", "索力 (t)"],
+            [
+                [
+                    str(item["index"]),
+                    str(item["name"]),
+                    f"{float(item['run']):.2f}",
+                    f"{float(item['angle_deg']):.1f}",
+                    f"{float(item['share']):.3f}",
+                    f"{float(item['force_t']):.2f}",
+                ]
+                for item in slings
+            ],
+        )
+        min_angle = float(load.get("min_angle_deg") or 0)
+        max_angle = float(load.get("max_angle_deg") or 0)
+        angle_text = (
+            f"四索与竖直夹角均为 {min_angle:.1f}°"
+            if abs(max_angle - min_angle) < 0.05
+            else f"夹角范围 {min_angle:.1f}°～{max_angle:.1f}°（与竖直方向）"
+        )
+        document.add_paragraph(
+            f"最大索力 {float(load.get('max_force_t') or 0):.2f} t，"
+            f"最小索力 {float(load.get('min_force_t') or 0):.2f} t；{angle_text}。"
+        )
+
+    split = cap.get("split") or {}
+    if cap.get("mode") == "dual" and split:
+        document.add_heading(f"3.{number}.1 双机抬吊的负荷分配", level=3)
+        if split.get("basis") == "cg":
+            document.add_paragraph(
+                f"按重心位置分配：主吊 {float(split['left_share']):.0%}、"
+                f"辅吊 {float(split['right_share']):.0%}。两台吊点分别在 "
+                f"{float(split['left_x']):+.2f} m 与 {float(split['right_x']):+.2f} m，"
+                f"重心在 {ex:+.2f} m，按杠杆关系分载。"
+            )
+        else:
+            document.add_paragraph(
+                f"未给吊物重心位置，按兜底比例 60/40 分载：主吊 "
+                f"{float(split['left_share']):.0%}、辅吊 {float(split['right_share']):.0%}。"
+            )
+        left = cap.get("left") or {}
+        right = cap.get("right") or {}
+        _add_table(
+            document,
+            ["机组", "分载比例", "计算荷载 (t)"],
+            [
+                ["主吊", f"{float(split['left_share']):.0%}",
+                 f"{float(left.get('required') or 0):.2f}"],
+                ["辅吊", f"{float(split['right_share']):.0%}",
+                 f"{float(right.get('required') or 0):.2f}"],
+            ],
+        )
+        document.add_paragraph(
+            "两台各自的计算荷载已乘不同步系数后，再按上述比例分配。"
+        )
+
+    for note in load.get("notes") or []:
+        document.add_paragraph(note, style="List Bullet")
 
 
 def render_report(
@@ -209,8 +330,17 @@ def render_report(
 
     # 3 计算过程
     document.add_heading("3 计算过程", level=1)
-    for index, check in enumerate(result.checks, start=1):
+    load = result.aux.get("load") or {}
+    cap = result.aux.get("capability")
+    index = 1
+    if _has_load_section(load):
+        _load_section(document, load, cap or {}, index)
+        index += 1
+    # 重心与索力已在「吊物与重心」一节成表展开，这里不再逐项重复
+    visible_checks = [check for check in result.checks if check.id not in _LOAD_CHECK_IDS]
+    for check in visible_checks:
         document.add_heading(f"3.{index} {check.title}", level=2)
+        index += 1
         document.add_paragraph(f"公式：{_formula_text(check.formula_id, formulas)}")
         if check.substituted:
             document.add_paragraph(f"代入：{check.substituted}")
@@ -224,10 +354,12 @@ def render_report(
         for note in check.notes:
             document.add_paragraph(f"说明：{note}")
 
-    cap = result.aux.get("capability")
+    # 反查详细过程接在最后一个小节之后（小节号随 checks 数量自动顺延）
+    section_no = index
     if cap:
         case = result.aux.get("case") or {}
-        document.add_heading("3.3 反查详细计算过程", level=2)
+        document.add_heading(f"3.{section_no} 反查详细计算过程", level=2)
+        detail_no = f"3.{section_no}"
 
         # 6.1 荷载组成
         payload = float(case.get("payload") or 0.0)
@@ -236,7 +368,7 @@ def render_report(
         factor = float(case.get("dynamic_factor") or 1.1)
         rigging_design = rigging * factor
         total = float(cap.get('required', payload + hook + rigging_design))
-        document.add_heading("3.3.1 计算荷载的组成", level=3)
+        document.add_heading(f"{detail_no}.1 计算荷载的组成", level=3)
         _add_table(
             document,
             ["项目", "计算式", "数值 (t)"],
@@ -251,7 +383,7 @@ def render_report(
         points = cap.get("points") or []
         limit = float(cap.get("limit") or 0.9)
         if 'records' in cap:
-            document.add_heading('3.3.2 原厂表候选工况', level=3)
+            document.add_heading(f"{detail_no}.2 原厂表候选工况", level=3)
             document.add_paragraph(cap['status'] + '：' + cap['explanation'])
             grouped = {}
             for record in cap['records']:
@@ -261,13 +393,17 @@ def render_report(
                 passed = [record for record in records if record['reason'] == '满足']
                 last = max((record['radius'] for record in passed), default=None)
                 following = next((record for record in records if last is None or record['radius'] > last), None)
+                following_text = (
+                    f"{following['radius']:g} m：{following['reason']}"
+                    if following else '本次候选中无更远档'
+                )
                 rows.append([config or '默认', f'{boom:g}', '—' if last is None else f'{last:g}',
-                             (f"{following['radius']:g} m：{following['reason']}" if following else '本次候选中无更远档')])
+                             following_text])
             if rows:
                 _add_table(document, ['配置', '臂长 (m)', '满足的最大表档 (m)', '下一候选及原因'], rows)
         elif points:
             # 6.2 逐臂扫描
-            document.add_heading("3.3.2 逐臂长扫描结果", level=3)
+            document.add_heading(f"{detail_no}.2 逐臂长扫描结果", level=3)
             by_boom: dict[float, list[tuple[float, float]]] = {}
             for boom, radius, rated in points:
                 by_boom.setdefault(float(boom), []).append((float(radius), float(rated)))
@@ -298,7 +434,7 @@ def render_report(
 
         # 6.3 临界格算术
         if cap.get("ok") and cap.get("rated_load"):
-            document.add_heading("3.3.3 临界格点的判定算术", level=3)
+            document.add_heading(f"{detail_no}.3 临界格点的判定算术", level=3)
             rated = float(cap["rated_load"])
             radius = float(cap["max_radius"])
             ratio = total / rated
@@ -312,7 +448,7 @@ def render_report(
                 ],
             )
         elif not cap.get("ok") and cap.get('shortfall_t') is not None:
-            document.add_heading("3.3.3 不能吊时的缺口", level=3)
+            document.add_heading(f"{detail_no}.3 不能吊时的缺口", level=3)
             document.add_paragraph(
                 f"全部格点均超限。最有利的一格在幅度 {float(cap.get('closest_radius') or 0):g} m，"
                 f"负荷率 {float(cap.get('closest_utilization') or 0):.3f}，"
@@ -353,9 +489,11 @@ def render_report(
     else:
         document.add_paragraph("本次计算为参数统计，无通过/不通过判定。")
 
-    if result.warnings:
+    load_notes = [str(item) for item in (load.get("notes") or [])]
+    remaining = [warning for warning in result.warnings if warning not in load_notes]
+    if remaining:
         document.add_heading("7 提示与未覆盖项", level=1)
-        for warning in result.warnings:
+        for warning in remaining:
             document.add_paragraph(warning, style="List Bullet")
 
     # 附录
@@ -384,6 +522,16 @@ def render_report(
         if value in (None, "", 0, 0.0):
             continue
         rows.append([label, f"{float(value):g}", unit])
+    if _has_load_section(load):
+        cg = load.get("cg") or {}
+        rows.extend([
+            ["吊物长 × 宽 × 高", f"{float(load['length_m']):g} × {float(load['width_m']):g}"
+                              f" × {float(load['height_m']):g}", "m"],
+            ["重心相对形心", f"({float(cg.get('x') or 0):+g}, {float(cg.get('y') or 0):+g}, "
+                        f"{float(cg.get('z') or 0):+g})", "m"],
+            ["吊索高度", f"{float(load.get('sling_height_m') or 0):g}", "m"],
+            ["推算所需起升高度", f"{float(load.get('required_lift_height_m') or 0):.2f}", "m"],
+        ])
     if rows:
         _add_table(document, ["项目", "取值", "单位"], rows)
 

@@ -304,3 +304,62 @@ select:focus-visible {
 [data-theme="refract"] .status[data-state="不满足"] { color: #a03635; }
 [data-theme="refract"] dl { border-color: #d3dfe0; }
 [data-theme="refract"] :focus-visible { outline-color: #186788; }
+
+/* ---- 三步向导与货物图（新增：尺寸/重心/三维预览） ---- */
+.steps { display: flex; gap: 6px; list-style: none; margin: 0 0 4px; padding: 0; }
+.steps li { flex: 1; min-width: 0; }
+.steps button { width: 100%; display: flex; align-items: center; gap: 6px; justify-content: center; }
+.steps b { display: inline-grid; place-items: center; width: 17px; height: 17px; border-radius: 50%; background: #3a3d4a; color: #cfd0da; font-size: 11px; }
+.steps li.active button { color: #d3ceff; border-color: #9e99cf; }
+.steps li.done b, .steps li.active b { background: #b8b3ed; color: #23212f; }
+.hint { margin: 8px 0; padding: 8px 10px; border-left: 3px solid #9e99cf; background: #2a2d38; color: #c9cad4; font-size: 12px; border-radius: 0 6px 6px 0; }
+.cg-field { border: 1px solid #4b4e5c; border-radius: 8px; margin: 12px 0 6px; padding: 4px 10px 8px; }
+.cg-field legend { padding: 0 6px; font-size: 12px; color: #c6c4dd; }
+.cg-field .warn, .warn { color: #ffb4a8; }
+.mode-cards { display: grid; gap: 8px; margin-bottom: 8px; }
+.mode-card { display: flex; flex-direction: column; gap: 3px; align-items: flex-start; padding: 12px; text-align: left; }
+.mode-card span { font-size: 12px; color: #a9abb6; }
+.mode-card.active { border-color: #9e99cf; box-shadow: inset 0 0 0 1px #9e99cf; }
+.summary { font-size: 12px; color: #b5b6c0; margin: 0 0 10px; line-height: 1.6; }
+button.link { padding: 0 2px; border: 0; background: none; color: #b8b3ed; text-decoration: underline; }
+.stage-title { padding: 8px 12px; border-bottom: 1px solid #41434e; }
+.load3d { display: flex; flex-direction: column; flex: 1; min-height: 0; color: #33404d; }
+.load3d-bar { display: flex; align-items: center; gap: 10px; padding: 6px 12px; border-bottom: 1px solid #41434e; }
+.load3d-bar button { margin-left: auto; }
+.load3d-svg { flex: 1; min-height: 0; width: 100%; touch-action: none; cursor: grab; user-select: none; }
+.load3d-svg.dragging { cursor: grabbing; }
+.load3d-foot { display: flex; gap: 16px; padding: 6px 12px; font-size: 12px; color: #4c6570; border-top: 1px solid #41434e; }
+.load3d .axis line { stroke: #2c7a58; color: #2c7a58; stroke-width: 1.2; stroke-dasharray: 8 3 1 3; }
+.load3d .axis text { fill: #2c7a58; font-size: 12px; }
+.load3d .box line { stroke: #33404d; stroke-width: 1.7; }
+.load3d .box line.hidden { stroke: #97a3ad; stroke-width: 1; stroke-dasharray: 6 4; }
+.load3d .sling line { stroke: #b03a30; stroke-width: 3; }
+.load3d .sling circle { fill: none; stroke: #b03a30; stroke-width: 1.6; }
+.load3d .sling circle.hook { fill: #b03a30; }
+.load3d .sling .hook-label { fill: #b03a30; font-size: 12px; }
+.load3d .dims text { fill: #2c7a58; font-size: 13px; }
+.load3d .cg-circle { fill: #fffefb; stroke: #193544; stroke-width: 1.4; }
+.load3d .cg-fill { fill: #193544; }
+.load3d .cg-cross { stroke: #193544; stroke-width: 1; }
+.load3d .cg text { fill: #193544; font-size: 13px; }
+.load3d .cg line { stroke: #8a97a1; }
+.stage .load3d { background: #f2f6f4; }
+[data-theme="refract"] .hint { background: #eef4f7; border-color: #4d7f96; color: #2f4f5f; }
+[data-theme="refract"] .cg-field { border-color: #cddadb; }
+[data-theme="refract"] .cg-field legend { color: #314f5e; }
+[data-theme="refract"] .steps b { background: #dbe6e7; color: #3a5563; }
+[data-theme="refract"] .steps li.active b { background: #175978; color: #fff; }
+[data-theme="refract"] .stage .load3d { background: #f4f8f5; }
+[data-theme="refract"] .load3d-foot { color: #4c6570; border-color: #d0dcdd; }
+[data-theme="refract"] .stage-title { border-color: #d0dcdd; }
+[data-theme="dusk"] .hint { background: #2a2d38; border-color: #9e99cf; color: #c9cad4; }
+[data-theme="dusk"] .stage .load3d { background: #1d2027; color: #d6dae0; }
+[data-theme="dusk"] .load3d .box line { stroke: #c9d1d8; }
+[data-theme="dusk"] .load3d .box line.hidden { stroke: #6c7681; }
+[data-theme="dusk"] .load3d .cg-circle { fill: #1d2027; stroke: #dfe7ec; }
+[data-theme="dusk"] .load3d .cg-fill { fill: #dfe7ec; }
+[data-theme="dusk"] .load3d .cg-cross { stroke: #dfe7ec; }
+[data-theme="dusk"] .load3d .cg text { fill: #dfe7ec; }
+[data-theme="dusk"] .load3d .axis text, [data-theme="dusk"] .load3d .dims text { fill: #7fceac; }
+[data-theme="dusk"] .load3d .axis line { stroke: #7fceac; color: #7fceac; }
+.load3d .cg-tag { font-weight: 600; }

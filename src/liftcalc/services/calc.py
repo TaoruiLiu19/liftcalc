@@ -21,6 +21,7 @@ from liftcalc.data.repo import Repo
 from liftcalc.fea import frame2d
 from liftcalc.geometry import solids as solid_lib
 from liftcalc.geometry.centroid import AssemblyItem, assembly_centroid
+from liftcalc.lifting import load_geometry
 from liftcalc.lifting.beam import BeamInput, check_beam
 from liftcalc.lifting.eye import EyeGeometry, EyeLoad, EyeWeld, check_eye
 from liftcalc.lifting.rigging import (
@@ -63,6 +64,7 @@ from liftcalc.services.cases import (
     CaseEnvelope,
     CentroidCase,
     CraneCase,
+    DualLiftModel,
     EyeCase,
     FrameCase,
     RiggingCase,
@@ -786,6 +788,178 @@ def _frame_case(case: FrameCase) -> ComputationResult:
     )
 
 
+def _load_shape(case: CapabilityCase) -> load_geometry.LoadShape:
+    """吊物几何：给了 load 用三维尺寸与重心，否则退回旧的两维示意字段。"""
+    if case.load is not None:
+        return load_geometry.LoadShape(
+            length=case.load.length_m,
+            width=case.load.width_m,
+            height=case.load.height_m,
+            cg_x=case.load.cg.x,
+            cg_y=case.load.cg.y,
+            cg_z=case.load.cg.z,
+            lug_inset=case.load.lug_inset_m,
+            sling_height=case.load.sling_height_m,
+        )
+    return load_geometry.LoadShape(
+        length=case.load_width_m,
+        width=case.load_width_m,
+        height=case.load_height_m,
+        sling_height=None,
+    )
+
+
+def _load_summary(case: CapabilityCase) -> dict[str, Any]:
+    """吊物与重心：几何、四索夹角/索力、所需起升高度。"""
+    shape = _load_shape(case)
+    shape.validate()
+    slings = load_geometry.sling_report(shape, case.payload)
+    derived_height = load_geometry.required_lift_height(shape, case.clearance_m)
+    explicit_height = case.required_lift_height
+    hook_height = derived_height if explicit_height is None else float(explicit_height)
+    return {
+        "length_m": shape.length,
+        "width_m": shape.width,
+        "height_m": shape.height,
+        "clearance_m": case.clearance_m,
+        "weight_t": case.payload,
+        "cg": {"x": shape.cg_x, "y": shape.cg_y, "z": shape.cg_z},
+        "lug_inset_m": shape.lug_inset,
+        "sling_height_m": slings.sling_height,
+        "sling_height_derived": slings.derived_height,
+        "slings": [
+            {
+                "index": item.index,
+                "name": item.name,
+                "x": item.x,
+                "y": item.y,
+                "run": item.run,
+                "length": item.length,
+                "angle_deg": item.angle_deg,
+                "share": item.share,
+                "force_t": item.force_t,
+            }
+            for item in slings.slings
+        ],
+        "max_force_t": slings.max_force_t,
+        "min_force_t": slings.min_force_t,
+        "max_angle_deg": slings.max_angle_deg,
+        "min_angle_deg": slings.min_angle_deg,
+        "required_lift_height_m": derived_height,
+        "hook_height_m": hook_height,
+        "height_source": "输入" if explicit_height is not None else "推算",
+        "notes": list(slings.notes),
+    }
+
+
+def _cg_check(summary: dict[str, Any]) -> CheckResult:
+    cg = summary["cg"]
+    eccentricity = (cg["x"] ** 2 + cg["y"] ** 2) ** 0.5
+    return CheckResult(
+        id="load.cg",
+        title="吊物重心（相对形心）",
+        substituted=(
+            f"ex={cg['x']:+.2f} m、ey={cg['y']:+.2f} m、ez={cg['z']:+.2f} m；"
+            f"水平偏心 {eccentricity:.2f} m"
+        ),
+        inputs={"ex": cg["x"], "ey": cg["y"], "ez": cg["z"]},
+        value=round(eccentricity, 4),
+        verdict=Verdict.NA,
+        unit="m",
+        source="以形心为原点的重心坐标（现场量测）",
+        notes=[
+            "x 沿吊物长度方向、指向远离吊车；y 沿宽度方向；z 竖向向上",
+            "重心偏离形心时四根吊索受力不均，双机抬吊的负荷也按重心位置分配",
+        ],
+    )
+
+
+def _sling_check(summary: dict[str, Any]) -> CheckResult:
+    slings = summary["slings"]
+    detail = "、".join(
+        f"索{item['index']}（{item['name']}）{item['angle_deg']:.1f}°/{item['force_t']:.2f} t"
+        for item in slings
+    )
+    return CheckResult(
+        id="load.sling",
+        title="四根吊索夹角与受力",
+        formula_id="crane.sling",
+        substituted=(
+            f"吊索高 {summary['sling_height_m']:.2f} m；{detail}；"
+            f"最大 {summary['max_force_t']:.2f} t、最小 {summary['min_force_t']:.2f} t"
+        ),
+        inputs={
+            "sling_height": round(summary["sling_height_m"], 4),
+            "max_force": round(summary["max_force_t"], 4),
+            "min_force": round(summary["min_force_t"], 4),
+        },
+        value=round(summary["max_force_t"], 4),
+        verdict=Verdict.NA,
+        unit="t",
+        source="静力线分配 R=W/4·(1±2ex/Lx)·(1±2ey/Ly)，索力 T=R/cosθ",
+        notes=[
+            "索力按吊件重量分配，未含吊钩与索具；吊索选型应另乘动载系数",
+            "夹角为吊索与竖直方向的夹角；索号 1–4 对应 远前 / 近前 / 远后 / 近后",
+        ],
+    )
+
+
+def _split_check(split: dict[str, Any], summary: dict[str, Any]) -> CheckResult:
+    basis = "按重心位置" if split.get("basis") == "cg" else "兜底比例"
+    return CheckResult(
+        id="dual.split",
+        title="双机负荷分配",
+        substituted=(
+            _split_text_short(split)
+            + f"；吊物重心 ex={summary['cg']['x']:+.2f} m"
+            + ("" if split.get("basis") != "cg"
+               else f"，吊点 {split['left_x']:+.2f} / {split['right_x']:+.2f} m")
+        ),
+        inputs={
+            "left_share": round(float(split["left_share"]), 4),
+            "right_share": round(float(split["right_share"]), 4),
+        },
+        value=round(float(split["left_share"]), 4),
+        verdict=Verdict.NA,
+        unit="—",
+        source=f"双机负荷分配（{basis}）",
+        notes=["重心偏向哪台，哪台分到的计算荷载就大；不同步系数再乘到两台各自的计算荷载上"],
+    )
+
+
+def _split_text_short(split: dict[str, Any]) -> str:
+    text = (
+        f"主吊 {float(split['left_share']):.0%}、辅吊 {float(split['right_share']):.0%}"
+    )
+    if split.get("basis") == "cg":
+        return text
+    return text + "（未给重心，按兜底比例）"
+
+
+def _dual_split(case: CapabilityCase) -> load_geometry.DualSplit:
+    """双机负荷分配：给了重心按重心，否则按给定比例，最后兜底 60/40。"""
+    if case.left_share is not None:
+        return load_geometry.fallback_split(case.left_share)
+    if case.load is None:
+        return load_geometry.fallback_split(0.6)
+    shape = _load_shape(case)
+    per_crane = case.dual or DualLiftModel()
+    return load_geometry.dual_split(
+        shape,
+        left_x=per_crane.left_point_x_m,
+        right_x=per_crane.right_point_x_m,
+    )
+
+
+def _split_text(split: load_geometry.DualSplit) -> str:
+    if split.basis == "cg":
+        return (
+            f"按重心位置分配：主吊 {split.left_share:.0%}、辅吊 {split.right_share:.0%}"
+            f"（吊点 {split.left_x:+.2f} / {split.right_x:+.2f} m）"
+        )
+    return f"按 {split.left_share:.0%}/{split.right_share:.0%} 分配（兜底比例）"
+
+
 def _capability_case(case: CapabilityCase, repo: Repo | None) -> ComputationResult:
     """能力反查：单机 90%、双机每台 80%。"""
     if repo is None:
@@ -844,17 +1018,14 @@ def _capability_case(case: CapabilityCase, repo: Repo | None) -> ComputationResu
     def points_payload(points: list[Any]) -> list[list[float]]:
         return [[p.boom_len, p.radius, p.rated_load] for p in points]
 
+    load_summary = _load_summary(case)
     checks: list[CheckResult] = []
     aux: dict[str, Any] = {
         "figure": "capability",
         "mode": case.mode,
-        "load": {
-            "width": case.load_width_m,
-            "height": case.load_height_m,
-            "clearance": case.clearance_m,
-        },
+        "load": load_summary,
     }
-    warnings: list[str] = []
+    warnings: list[str] = list(load_summary["notes"])
     if selected_hook:
         warnings.append(f"采用 {selected_hook['rated_t']:g} t 主钩，自重 {hook_mass:g} t。请核对实车吊钩及穿绳倍率。")
     elif hook_from_db:
@@ -867,12 +1038,30 @@ def _capability_case(case: CapabilityCase, repo: Repo | None) -> ComputationResu
         )
     left_points = load_points(case.crane)
 
+    # 起升高度：给了吊物三维尺寸就由"净空 + 吊物高 + 吊索高"推算；
+    # 只有性能表确实有起升高度列时才拿它查表，否则只出数值并提示。
+    has_height_data = any(point.lift_height is not None for point in left_points)
+    if case.required_lift_height is not None:
+        height_required: float | None = float(case.required_lift_height)
+    elif case.load is not None and has_height_data:
+        height_required = float(load_summary["required_lift_height_m"])
+    else:
+        height_required = None
+    if case.load is not None and not has_height_data:
+        warnings.append(
+            "该机型性能表没有起升高度列，推算的所需起升高度 "
+            f"{load_summary['required_lift_height_m']:.2f} m 未参与查表校核，请按实车臂长核对"
+        )
+
     if case.mode == "single":
         verdict, records, status, explanation = crane_capability.assess_single(
-            left_points, required=required, limit=limit, height=case.required_lift_height,
+            left_points, required=required, limit=limit, height=height_required,
             radius=case.target_radius, config=case.config, hook_known=hook_mass > 0,
-            hook_overload=(selected_hook is not None and
-                           case.payload + case.rigging * case.dynamic_factor > selected_hook["rated_t"] + crane_capability.TOL),
+            hook_overload=(
+                selected_hook is not None
+                and case.payload + case.rigging * case.dynamic_factor
+                > selected_hook["rated_t"] + crane_capability.TOL
+            ),
         )
         ok = verdict.ok
         checks.append(
@@ -918,21 +1107,25 @@ def _capability_case(case: CapabilityCase, repo: Repo | None) -> ComputationResu
                     notes=["负荷率 = 计算荷载 ÷ 该格额定值"],
                 )
             )
-            if case.required_lift_height is not None and verdict.lift_height is not None:
-                height_ok = verdict.lift_height >= case.required_lift_height - 1e-9
+            if height_required is not None and verdict.lift_height is not None:
+                height_ok = verdict.lift_height >= height_required - 1e-9
+                height_basis = (
+                    "输入值" if case.required_lift_height is not None
+                    else "净空+吊物高+吊索高"
+                )
                 checks.append(
                     CheckResult(
                         id="capability.lift_height",
                         title="起升高度（净空）",
                         formula_id="crane.lift_height",
                         substituted=(
-                            f"该格起升高度 {verdict.lift_height:g} m ≥ 需求 {case.required_lift_height:g} m"
-                            if height_ok
-                            else f"该格起升高度 {verdict.lift_height:g} m < 需求 {case.required_lift_height:g} m"
+                            f"需求 {height_required:g} m（{height_basis}）；"
+                            f"该格起升高度 {verdict.lift_height:g} m "
+                            + ("≥ 需求" if height_ok else "< 需求")
                         ),
-                        inputs={"available": verdict.lift_height, "required": case.required_lift_height},
+                        inputs={"available": verdict.lift_height, "required": height_required},
                         value=round(verdict.lift_height, 3),
-                        limit=case.required_lift_height,
+                        limit=height_required,
                         verdict=Verdict.PASS if height_ok else Verdict.FAIL,
                         unit="m",
                         source="原厂性能表 起升高度列",
@@ -992,9 +1185,9 @@ def _capability_case(case: CapabilityCase, repo: Repo | None) -> ComputationResu
         if case.second is None:
             raise InputError("双机模式需要给出第二台机型 second")
         right_points = load_points(case.second)
-        left_req, right_req = crane_capability.split_by_ratio(
-            required * case.asynchronism, case.left_share
-        )
+        split = _dual_split(case)
+        left_req = required * case.asynchronism * split.left_share
+        right_req = required * case.asynchronism * split.right_share
         verdict_left, verdict_right = crane_capability.find_dual(
             left_points,
             right_points,
@@ -1022,10 +1215,16 @@ def _capability_case(case: CapabilityCase, repo: Repo | None) -> ComputationResu
                 substituted=text,
                 inputs={"required": round(verdict.required_load, 3)},
                 value=0.0 if verdict.max_radius is None else round(verdict.max_radius, 3),
-                limit=limit,
+                # 计算值是"最远幅度 (m)"，不要把它和负荷率上限（0.8）放在同一列
+                limit=None,
+                ratio=(
+                    None if verdict.utilization is None or limit <= 0
+                    else round(verdict.utilization / limit, 4)
+                ),
                 verdict=Verdict.PASS if verdict.ok else Verdict.FAIL,
                 unit="m",
                 source="原厂性能表（查表取档，不插值）",
+                notes=["利用率为该机负荷率 ÷ 每台上限"],
             )
 
         checks.append(
@@ -1034,13 +1233,13 @@ def _capability_case(case: CapabilityCase, repo: Repo | None) -> ComputationResu
                 title="双机抬吊结论",
                 formula_id="crane.capability",
                 substituted=(
-                    f"总计算荷载 {required:.2f} t，按 {case.left_share:.0%}/{1 - case.left_share:.0%} 分配，"
+                    f"总计算荷载 {required:.2f} t，{_split_text(split)}，"
                     f"不同步系数 {case.asynchronism:g}，每台上限 {limit:.0%} → "
                     + ("两台均满足" if ok else "存在不满足的机组")
                 ),
                 inputs={
                     "required": round(required, 3),
-                    "left_share": case.left_share,
+                    "left_share": round(split.left_share, 4),
                     "asynchronism": case.asynchronism,
                     "limit": limit,
                 },
@@ -1060,7 +1259,15 @@ def _capability_case(case: CapabilityCase, repo: Repo | None) -> ComputationResu
             "second_model": case.second.model,
             "required": required,
             "limit": limit,
-            "left_share": case.left_share,
+            "left_share": split.left_share,
+            "right_share": split.right_share,
+            "split": {
+                "basis": split.basis,
+                "left_x": split.left_x,
+                "right_x": split.right_x,
+                "left_share": split.left_share,
+                "right_share": split.right_share,
+            },
             "asynchronism": case.asynchronism,
             "ok": ok,
             "left": {
@@ -1088,6 +1295,11 @@ def _capability_case(case: CapabilityCase, repo: Repo | None) -> ComputationResu
             "points": points_payload(left_points),
             "points_right": points_payload(right_points),
         }
+
+    checks.append(_cg_check(load_summary))
+    checks.append(_sling_check(load_summary))
+    if case.mode == "dual":
+        checks.append(_split_check(aux["capability"]["split"], load_summary))
 
     aux['capability']['tonnage_class'] = model_row.get('tonnage_class') if model_row else None
     verdict_name, governing, utilization = summarize(checks)

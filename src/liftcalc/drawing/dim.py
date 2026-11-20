@@ -211,7 +211,8 @@ def angle_dim(figure: Figure, cx: float, cy: float, radius: float,
               start_deg: float, end_deg: float, content: str,
               *, height: float = DIM_TEXT_H, text_radius: float | None = None,
               text_at_deg: float | None = None,
-              text_xy: tuple[float, float] | None = None) -> None:
+              text_xy: tuple[float, float] | None = None,
+              text_align: str = ALIGN_RIGHT) -> None:
     """角度尺寸：以 (cx, cy) 为心、radius 为半径画弧，两端带箭头，文字在弧外。"""
     span = end_deg - start_deg
     steps = max(8, int(abs(span) / 6) + 8)
@@ -230,7 +231,7 @@ def angle_dim(figure: Figure, cx: float, cy: float, radius: float,
 
     if text_xy is not None:
         figure.add(Text(x=text_xy[0], y=text_xy[1], content=content, height=height,
-                        align=ALIGN_RIGHT, layer=LAYER_DIM))
+                        align=text_align, layer=LAYER_DIM))
         return
 
     mid_deg = start_deg + span / 2.0 if text_at_deg is None else text_at_deg

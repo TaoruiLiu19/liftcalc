@@ -198,14 +198,28 @@ def capability_cmd(
     mode: str = typer.Option("single", "--mode", help="single 或 dual"),
     second_model: str | None = typer.Option(None, "--second-model", help="双机时的第二台机型"),
     second_brand: str = typer.Option("徐工", "--second-brand"),
-    left_share: float = typer.Option(0.6, "--left-share", help="主吊承担比例"),
+    left_share: float | None = typer.Option(
+        None, "--left-share", help="主吊承担比例（不给时按重心位置分配，无重心信息则兜底 0.6）"
+    ),
     asynchronism: float = typer.Option(1.0, "--asynchronism", help="不同步系数"),
     target_radius: float | None = typer.Option(None, "--target-radius", "--radius", help="单机指定作业幅度 m"),
     config: str | None = typer.Option(None, "--config", help="限定单机性能表配置，传入完整配置名"),
-    required_height: float | None = typer.Option(None, "--required-height", help="单机所需起升高度 m"),
-    load_width: float = typer.Option(3.2, "--load-width", help="图示吊物宽 m（只影响立面图）"),
-    load_height: float = typer.Option(3.8, "--load-height", help="图示吊物高 m（只影响立面图）"),
-    clearance: float = typer.Option(1.0, "--clearance", help="图示吊物底距地净空 m（只影响立面图）"),
+    required_height: float | None = typer.Option(
+        None, "--required-height", help="手动指定所需起升高度 m（默认由吊物高+吊索高推算）"
+    ),
+    load_length: float | None = typer.Option(
+        None, "--load-length", "--load-width", help="吊物长 m（立面内、沿幅度方向）"
+    ),
+    load_depth: float | None = typer.Option(None, "--load-depth", help="吊物宽 m（垂直立面方向）"),
+    load_height: float | None = typer.Option(None, "--load-height", help="吊物高 m"),
+    cg_x: float | None = typer.Option(None, "--cg-x", help="重心相对形心的 x 偏心 m（沿长度，指向远离吊车为正）"),
+    cg_y: float | None = typer.Option(None, "--cg-y", help="重心相对形心的 y 偏心 m（沿宽度）"),
+    cg_z: float | None = typer.Option(None, "--cg-z", help="重心相对形心的 z 偏心 m（向上为正）"),
+    sling_height: float | None = typer.Option(None, "--sling-height", help="吊索竖直高度 m（吊钩中心到吊点）"),
+    lug_inset: float | None = typer.Option(None, "--lug-inset", help="吊点自顶面四角向内收进 m"),
+    dual_left_x: float | None = typer.Option(None, "--dual-left-x", help="双机左吊点在吊物上的 x 坐标 m"),
+    dual_right_x: float | None = typer.Option(None, "--dual-right-x", help="双机右吊点在吊物上的 x 坐标 m"),
+    clearance: float | None = typer.Option(None, "--clearance", help="吊物底距地净空 m"),
     limit: float | None = typer.Option(None, "--limit", help="负荷率上限（默认单机 0.9 / 双机 0.8）"),
     out: Path | None = typer.Option(None, "--out", "-o"),
     db: Path = typer.Option(Path("data/liftcalc.sqlite"), "--db"),
@@ -219,18 +233,33 @@ def capability_cmd(
         "rigging": rigging,
         "dynamic_factor": dynamic_factor,
         "crane": {"brand": brand, "model": model},
-        "left_share": left_share,
         "asynchronism": asynchronism,
         "target_radius": target_radius,
         "config": config,
-        "load_width_m": load_width,
-        "load_height_m": load_height,
-        "clearance_m": clearance,
     }
+    if left_share is not None:
+        case["left_share"] = left_share
     if limit is not None:
         case["limit"] = limit
     if required_height is not None:
         case["required_lift_height"] = required_height
+    load_fields = (load_length, load_depth, load_height, cg_x, cg_y, cg_z,
+                   sling_height, lug_inset, clearance)
+    if any(value is not None for value in load_fields):
+        case["load"] = {
+            "length_m": 3.2 if load_length is None else load_length,
+            "width_m": (3.2 if load_length is None else load_length) if load_depth is None else load_depth,
+            "height_m": 3.8 if load_height is None else load_height,
+            "cg": {"x": cg_x or 0.0, "y": cg_y or 0.0, "z": cg_z or 0.0},
+            "lug_inset_m": lug_inset or 0.0,
+        }
+        if sling_height is not None:
+            case["load"]["sling_height_m"] = sling_height
+        case["clearance_m"] = 1.0 if clearance is None else clearance
+    elif clearance is not None:
+        case["clearance_m"] = clearance
+    if dual_left_x is not None or dual_right_x is not None:
+        case["dual"] = {"left_point_x_m": dual_left_x, "right_point_x_m": dual_right_x}
     if mode == "dual":
         case["second"] = {"brand": second_brand, "model": second_model or model}
     try:

@@ -244,6 +244,38 @@ class CraneRef(BaseModel):
     model: str
 
 
+class LoadCgModel(BaseModel):
+    """重心相对吊物形心的偏移（m）；x 沿长度指向远离吊车，y 沿宽度，z 向上。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    x: float = 0.0
+    y: float = 0.0
+    z: float = 0.0
+
+
+class LoadModel(BaseModel):
+    """吊物真实尺寸与吊点/吊索参数（m）。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    length_m: float = Field(default=3.2, gt=0)
+    width_m: float = Field(default=3.2, gt=0)
+    height_m: float = Field(default=3.8, gt=0)
+    cg: LoadCgModel = Field(default_factory=LoadCgModel)
+    lug_inset_m: float = Field(default=0.0, ge=0)
+    sling_height_m: float | None = Field(default=None, gt=0)
+
+
+class DualLiftModel(BaseModel):
+    """双机抬吊的两台吊点位置（吊物局部坐标，m），默认取两端吊点。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    left_point_x_m: float | None = None
+    right_point_x_m: float | None = None
+
+
 class CapabilityCase(CaseEnvelope):
     """能力反查：给定吊重，问能不能吊、最远多少米、多高。
 
@@ -262,10 +294,14 @@ class CapabilityCase(CaseEnvelope):
     limit: float | None = Field(default=None, gt=0, le=1)
     crane: CraneRef
     second: CraneRef | None = None
-    left_share: float = 0.6
+    # 不给 left_share 时：单机忽略；双机按重心位置分配，缺重心信息时退回 60/40
+    left_share: float | None = Field(default=None, gt=0, lt=1)
     asynchronism: float = 1.0
     required_lift_height: float | None = Field(default=None, ge=0)
-    # 以下三项只影响立面图的示意尺寸，不参与能力反查
+    # 吊物三维尺寸与重心；给了 load 才会据此推算所需起升高度
+    load: LoadModel | None = None
+    dual: DualLiftModel | None = None
+    # 以下三项是 load 缺省时的兼容字段，只影响立面图的示意尺寸
     load_width_m: float = Field(default=3.2, gt=0)
     load_height_m: float = Field(default=3.8, gt=0)
     clearance_m: float = Field(default=1.0, ge=0)
