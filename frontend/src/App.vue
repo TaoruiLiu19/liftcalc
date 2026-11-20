@@ -11,7 +11,7 @@ import Load3D from './Load3D.vue'
 import SheetViewer from './SheetViewer.vue'
 import type { Snapshot, Model } from './types'
 const CadPane = defineAsyncComponent(() => import('./CadPane.vue'))
-const theme = ref('refract')
+const theme = ref('light')
 watch(theme, value => { document.documentElement.dataset.theme = value }, { immediate: true })
 const sheetViewer = ref<InstanceType<typeof SheetViewer>>()
 const models = ref<Model[]>([]),
@@ -20,8 +20,7 @@ const models = ref<Model[]>([]),
   notice = ref(''),
   tab = ref('sheet'),
   usedCad = ref(false),
-  step = ref(1),
-  mode = ref<'single' | 'dual'>('single')
+  step = ref(1)
 const form = reactive({
   model: 'QY70K-1',
   config: '',
@@ -52,9 +51,9 @@ const hookOptions = computed(() => activeModel.value?.main_hooks ?? [])
 const legacyHook = computed(() => activeModel.value?.hook_main_t)
 const customHook = computed(() => !hookOptions.value.length || form.hookChoice === 'manual')
 const needsHookMass = computed(() => !!hookOptions.value.length || !legacyHook.value)
-const halfLength = computed(() => Math.max(0.05, +form.length / 2 || 0.05))
-const halfDepth = computed(() => Math.max(0.05, +form.depth / 2 || 0.05))
-const halfHeight = computed(() => Math.max(0.05, +form.loadHeight / 2 || 0.05))
+const halfLength = computed(() => +form.length / 2)
+const halfDepth = computed(() => +form.depth / 2)
+const halfHeight = computed(() => +form.loadHeight / 2)
 const cg = computed(() => ({ x: +form.cgX || 0, y: +form.cgY || 0, z: +form.cgZ || 0 }))
 const geometryReady = computed(
   () => +form.length > 0 && +form.depth > 0 && +form.loadHeight > 0 && +form.payload > 0,
@@ -65,6 +64,23 @@ const cgInside = computed(
     Math.abs(cg.value.y) <= halfDepth.value + 1e-9 &&
     Math.abs(cg.value.z) <= halfHeight.value + 1e-9,
 )
+const geometryIssue = computed(() => {
+  if (!geometryReady.value) return '请填写吊物长、宽、高和重量，数值均须大于零。'
+  if (!cgInside.value) return '重心超出吊物轮廓，请检查坐标。'
+  const inset = +form.lugInset
+  if (inset < 0 || inset >= Math.min(halfLength.value, halfDepth.value))
+    return '吊点内缩须小于长、宽中较小尺寸的一半，且不能为负。'
+  if (Math.abs(cg.value.x) >= halfLength.value - inset || Math.abs(cg.value.y) >= halfDepth.value - inset)
+    return '重心水平投影须在四个吊点围成的区域内，请检查重心和吊点内缩。'
+  if (form.slingHeight !== '' && +form.slingHeight <= 0) return '请填写正的吊索高度，或留空自动推算。'
+  if (form.clearance === '' || +form.clearance < 0) return '请填写非负的吊物底净空。'
+  return ''
+})
+const previewSlingHeight = computed(() => form.slingHeight === ''
+  ? Math.hypot(halfLength.value - +form.lugInset - Math.abs(cg.value.x),
+               halfDepth.value - +form.lugInset - Math.abs(cg.value.y)) * Math.sqrt(3)
+  : +form.slingHeight)
+const showResult = computed(() => step.value === 2 && snapshot.value !== null)
 const cgFromCentroid = computed(() => Math.hypot(cg.value.x, cg.value.y))
 let revision = 0
 function showCad() {
@@ -76,7 +92,7 @@ watch(
   () => {
     revision++
     snapshot.value = null
-    if (step.value === 3) notice.value = '输入已改变，请重新计算。'
+    if (step.value === 2) notice.value = '输入已改变，请重新计算。'
   },
   { flush: 'sync' },
 )
@@ -91,38 +107,20 @@ watch(
   { flush: 'sync' },
 )
 function goStep(next: number) {
-  if (next > step.value) {
-    if (step.value === 1 && !geometryReady.value) {
-      notice.value = '请先填写吊物尺寸与重量（均为正数）。'
-      return
-    }
-    if (step.value === 1 && !cgInside.value) {
-      notice.value = '重心坐标超出吊物轮廓，请按相对形心的实际位置填写。'
-      return
-    }
-    if (step.value === 2 && !geometryReady.value) {
-      notice.value = '吊物参数不完整，请回到第一步。'
-      return
-    }
+  if (next === 2 && geometryIssue.value) {
+    notice.value = geometryIssue.value
+    return
   }
   notice.value = ''
   step.value = next
-}
-function goToCrane() {
-  goStep(3)
 }
 async function calculate() {
   const id = revision
   busy.value = true
   notice.value = ''
   try {
-    if (!geometryReady.value) {
-      notice.value = '吊物尺寸与重量必须为正。'
-      step.value = 1
-      return
-    }
-    if (!cgInside.value) {
-      notice.value = '重心坐标超出吊物轮廓，请按相对形心的实际位置填写。'
+    if (geometryIssue.value) {
+      notice.value = geometryIssue.value
       step.value = 1
       return
     }
@@ -133,7 +131,7 @@ async function calculate() {
     }
     const data = await window.pywebview!.api.calculate({
       kind: 'crane.capability',
-      mode: mode.value,
+      mode: 'single',
       crane: { model: form.model, brand: configs.value[0]?.brand || '徐工' },
       config: form.config || null,
       payload: +form.payload,
@@ -155,7 +153,6 @@ async function calculate() {
     if (id === revision) {
       snapshot.value = data
       tab.value = 'sheet'
-      step.value = 3
     }
   } catch (e) {
     notice.value = String(e)
@@ -189,20 +186,20 @@ async function save(fmt: string) {
   <header>
     <b>Liftcalc</b><span class="divider"></span><span>吊装复核工作台</span
     ><small>● 本机离线</small>
-    <select class="theme-select" aria-label="界面主题" v-model="theme"><option value="refract">Refract</option><option value="dusk">Dusk</option></select>
+    <select class="theme-select" aria-label="界面主题" v-model="theme"><option value="light">浅色</option><option value="dark">深色</option></select>
   </header>
   <main>
     <div class="workspace">
       <div class="inspector">
         <ol class="steps" aria-label="计算步骤">
-          <li v-for="item in [{ n: 1, t: '吊物' }, { n: 2, t: '双机' }, { n: 3, t: '车型' }]" :key="item.n"
+          <li v-for="item in [{ n: 1, t: '吊物与重心' }, { n: 2, t: '车型与工况' }]" :key="item.n"
               :class="{ active: step === item.n, done: step > item.n }">
             <button type="button" @click="goStep(item.n)"><b>{{ item.n }}</b>{{ item.t }}</button>
           </li>
         </ol>
 
         <form v-if="step === 1" @submit.prevent="goStep(2)">
-          <h2>① 吊物尺寸与重量</h2>
+          <h2>吊物尺寸与重量</h2>
           <div class="pair">
             <label>长（沿幅度）/ m<input required type="number" step="any" min=".01" v-model="form.length" /></label>
             <label>宽（垂直立面）/ m<input required type="number" step="any" min=".01" v-model="form.depth" /></label>
@@ -210,50 +207,34 @@ async function save(fmt: string) {
             <label>吊物重量 / t<input required type="number" step="any" min=".001" v-model="form.payload" /></label>
           </div>
           <p class="hint">
-            右侧已按真实尺寸生成三维货物图（带坐标系）。原点在形心：x 沿长度、指向远离吊车，y 沿宽度，z 竖向。
-            请在下方填写重心坐标（相对形心）。
+            原点在吊物形心。x 沿长度指向远离吊车的一侧，y 沿宽度，z 竖直向上。
           </p>
           <fieldset class="cg-field">
-            <legend>② 重心坐标（相对形心）</legend>
+            <legend>重心坐标（相对形心）</legend>
             <div class="pair">
-              <label>ex / m<input type="number" step="0.05" :min="-halfLength" :max="halfLength" v-model="form.cgX" /></label>
-              <label>ey / m<input type="number" step="0.05" :min="-halfDepth" :max="halfDepth" v-model="form.cgY" /></label>
-              <label>ez / m<input type="number" step="0.05" :min="-halfHeight" :max="halfHeight" v-model="form.cgZ" /></label>
+              <label>ex / m<input type="number" step="any" :min="-halfLength" :max="halfLength" v-model="form.cgX" /></label>
+              <label>ey / m<input type="number" step="any" :min="-halfDepth" :max="halfDepth" v-model="form.cgY" /></label>
+              <label>ez / m<input type="number" step="any" :min="-halfHeight" :max="halfHeight" v-model="form.cgZ" /></label>
               <label>水平偏心 / m<input :value="cgFromCentroid.toFixed(2)" readonly tabindex="-1" /></label>
             </div>
             <p class="muted" :class="{ warn: !cgInside }">
-              {{ cgInside ? '重心落在吊物轮廓内。偏心时四根吊索受力不均，双机抬吊也按重心位置分载。' : '重心超出吊物轮廓，请检查坐标。' }}
+              {{ cgInside ? '水平偏移改变吊钩位置；竖向偏移改变重心标记高度。' : '重心超出吊物轮廓，请检查坐标。' }}
             </p>
           </fieldset>
           <details>
             <summary>吊索与净空</summary>
             <div class="pair">
-              <label>吊索竖直高度 / m<input type="number" step="any" min=".1" v-model="form.slingHeight" /></label>
+              <label>吊索竖直高度 / m<input type="number" step="any" placeholder="留空自动推算" v-model="form.slingHeight" /></label>
               <label>吊点内缩 / m<input type="number" step="any" min="0" v-model="form.lugInset" /></label>
               <label>吊物底净空 / m<input required type="number" step="any" min="0" v-model="form.clearance" /></label>
             </div>
             <p class="muted">所需起升高度 = 净空 + 吊物高 + 吊索高，自动推算，无需手工填写。</p>
           </details>
-          <button class="primary" :disabled="!geometryReady">下一步：吊装方式</button>
-        </form>
-
-        <form v-else-if="step === 2" @submit.prevent="goToCrane">
-          <h2>③ 吊装方式</h2>
-          <div class="mode-cards">
-            <button type="button" class="mode-card" :class="{ active: mode === 'single' }" @click="mode = 'single'">
-              <b>单机</b><span>一台汽车吊，按原厂性能表反查最远幅度</span>
-            </button>
-            <button type="button" class="mode-card" :class="{ active: mode === 'dual' }" disabled
-                    title="双机抬吊接口已预留，当前版本暂不可用">
-              <b>双机抬吊</b><span>按重心位置分配负荷（接口已预留，暂不可用）</span>
-            </button>
-          </div>
-          <p class="hint">双机抬吊的后端计算与计算书已成节（按重心分载，缺重心时退回 60/40），界面暂未开放。</p>
-          <button class="primary" type="submit">下一步：选择车型</button>
+          <button class="primary" :disabled="!!geometryIssue">下一步：选择车型</button>
         </form>
 
         <form v-else @submit.prevent="calculate">
-          <h2>④ 车型与工况</h2>
+          <h2>单机车型与工况</h2>
           <p class="summary">
             吊物 {{ form.length }}×{{ form.depth }}×{{ form.loadHeight }} m ·
             {{ form.payload }} t · 重心 ({{ cg.x.toFixed(2) }}, {{ cg.y.toFixed(2) }}, {{ cg.z.toFixed(2) }}) m
@@ -327,7 +308,7 @@ async function save(fmt: string) {
           </button>
         </form>
 
-        <aside v-if="snapshot">
+        <aside v-if="showResult && snapshot">
           <h2>复核结果</h2>
           <p class="status" :data-state="cap?.status">
             {{ cap?.status || '待计算' }}
@@ -365,7 +346,7 @@ async function save(fmt: string) {
         </aside>
       </div>
       <section class="stage">
-        <nav v-if="snapshot">
+        <nav v-if="showResult && snapshot">
           <button :class="{ active: tab === 'sheet' }" @click="tab = 'sheet'">
             吊装示意</button
           ><button :class="{ active: tab === 'cad' }" @click="showCad">CAD 核图</button>
@@ -384,30 +365,31 @@ async function save(fmt: string) {
           <strong>货物图 · 尺寸 / 重量 / 重心</strong>
           <span class="muted">第 {{ step }} 步</span>
         </nav>
-        <div v-if="snapshot && tab === 'sheet'" class="paper">
+        <div v-if="showResult && snapshot && tab === 'sheet'" class="paper">
           <button v-if="snapshot?.svg" class="sheet-open" aria-label="放大吊装示意图" title="放大吊装示意图" @click="sheetViewer?.open()" v-html="snapshot.svg"></button>
           <p v-else>尚无可显示的工况立面</p>
         </div>
         <Load3D
-          v-else-if="!snapshot"
-          :length="+form.length || 3.2"
-          :width="+form.depth || 3.2"
-          :height="+form.loadHeight || 3.8"
+          v-else-if="!showResult && !geometryIssue"
+          :length="+form.length"
+          :width="+form.depth"
+          :height="+form.loadHeight"
           :cg="cg"
-          :sling-height="+form.slingHeight || 3.5"
+          :sling-height="previewSlingHeight"
           :inset="+form.lugInset || 0"
           :weight="+form.payload || 0"
         />
-        <CadPane v-if="usedCad && snapshot" v-show="tab === 'cad'" :snapshot="snapshot" />
-        <div class="caption">
-          {{ snapshot && tab === 'sheet'
+        <p v-else-if="!showResult" class="hint" role="status">{{ geometryIssue }}</p>
+        <CadPane v-if="usedCad && showResult && snapshot" v-show="tab === 'cad'" :snapshot="snapshot" />
+        <div v-if="!showResult || tab === 'sheet'" class="caption">
+          {{ showResult && tab === 'sheet'
             ? '点击图纸放大 · A3 立面 · 图示姿态不等于现场净空校核'
-            : '拖动三维图可旋转 · 重心用形心符号标出 · 数据不完整时不出图' }}
+            : '固定轴测视图 · 虚线连接吊钩与重心 G' }}
         </div>
       </section>
     </div>
     <p role="status" v-if="notice">{{ notice }}</p>
-    <footer>仅供学习与专业复核，不作为工程实施依据。</footer>
+    <footer>用于专业复核，不作为工程实施依据。</footer>
     <SheetViewer v-if="snapshot?.svg" ref="sheetViewer" :svg="snapshot.svg" />
   </main>
 </template>

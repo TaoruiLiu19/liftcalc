@@ -108,8 +108,8 @@ def load_figure(result: ComputationResult) -> Figure | None:
     inset = float(load.get("lug_inset_m") or 0.0)
 
     hx, hy, hz = length / 2.0, width / 2.0, height / 2.0
-    # 吊钩顶点：形心正上方，吊点平面 + 吊索高
-    apex = (0.0, 0.0, hz + sling_h)
+    hook_x, hook_y = load.get("hook_xy_m", (0.0, 0.0))  # 旧结果的索长按形心计算
+    apex = (hook_x, hook_y, hz + sling_h)
     lugs = [
         (hx - inset, hy - inset, hz),
         (-(hx - inset), hy - inset, hz),

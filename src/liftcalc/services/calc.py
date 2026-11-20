@@ -824,6 +824,7 @@ def _load_summary(case: CapabilityCase) -> dict[str, Any]:
         "clearance_m": case.clearance_m,
         "weight_t": case.payload,
         "cg": {"x": shape.cg_x, "y": shape.cg_y, "z": shape.cg_z},
+        "hook_xy_m": [shape.cg_x, shape.cg_y],
         "lug_inset_m": shape.lug_inset,
         "sling_height_m": slings.sling_height,
         "sling_height_derived": slings.derived_height,

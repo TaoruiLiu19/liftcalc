@@ -276,36 +276,32 @@ select:focus-visible {
 .sheet-scroll svg { display: block; width: 100%; height: 100%; }
 .gl .ml-cli-container, .gl .ml-ui-shortcut-toolbar-shell, .gl [role="toolbar"] { display: none !important; }
 
-/* Refract · daylight through glass, with pool-blue ink on warm plaster. */
-:root[data-theme="refract"] {
+/* 浅色工作台 */
+:root[data-theme="light"] {
   color-scheme: light;
   color: #193544;
-  background: #f7f7f2;
+  background: #f2f4f7;
 }
-[data-theme="refract"] body {
-  min-height: 100vh;
-  background: linear-gradient(113deg, transparent 55%, #dcece9 64%, #fffef6 65%, #dfedf0 67%, transparent 79%) top right / 100% 265px no-repeat;
-}
-[data-theme="refract"] header { background: #fcfcf7; border-color: #d0dcdd; }
-[data-theme="refract"] :is(form, aside, .stage, .sheet-dialog) {
-  background: #fffefb; border-color: #cddadb; border-radius: 16px;
+[data-theme="light"] header { background: #ffffff; border-color: #d0dcdd; }
+[data-theme="light"] :is(form, aside, .stage, .sheet-dialog) {
+  background: #ffffff; border-color: #cddadb; border-radius: 16px;
   box-shadow: 4px 12px 25px -18px #477b8b;
 }
-[data-theme="refract"] :is(.muted,footer,.caption,dt,header small) { color: #4c6570; }
-[data-theme="refract"] :is(summary,label) { color: #314f5e; }
-[data-theme="refract"] :is(select,input:not([type=checkbox]),button) { background: #fafcfb; color: #203f4e; border-color: #aec3c8; }
-[data-theme="refract"] :is(button.active,button:hover:not(:disabled)) { color: #133e55; background: #e1eff1; border-color: #50829a; }
-[data-theme="refract"] form button.primary { background: #175978; color: white; border-color: #175978; }
-[data-theme="refract"] .paper { background: #e4edec; }
-[data-theme="refract"] button.sheet-open { background: transparent; }
-[data-theme="refract"] .cover { color: #e8eeee; }
-[data-theme="refract"] .status { color: #875d1a; }
-[data-theme="refract"] .status[data-state="满足"] { color: #16644f; }
-[data-theme="refract"] .status[data-state="不满足"] { color: #a03635; }
-[data-theme="refract"] dl { border-color: #d3dfe0; }
-[data-theme="refract"] :focus-visible { outline-color: #186788; }
+[data-theme="light"] :is(.muted,footer,.caption,dt,header small) { color: #4c6570; }
+[data-theme="light"] :is(summary,label) { color: #314f5e; }
+[data-theme="light"] :is(select,input:not([type=checkbox]),button) { background: #fafcfb; color: #203f4e; border-color: #aec3c8; }
+[data-theme="light"] :is(button.active,button:hover:not(:disabled)) { color: #133e55; background: #e1eff1; border-color: #50829a; }
+[data-theme="light"] form button.primary { background: #175978; color: white; border-color: #175978; }
+[data-theme="light"] .paper { background: #e4edec; }
+[data-theme="light"] button.sheet-open { background: transparent; }
+[data-theme="light"] .cover { color: #e8eeee; }
+[data-theme="light"] .status { color: #875d1a; }
+[data-theme="light"] .status[data-state="满足"] { color: #16644f; }
+[data-theme="light"] .status[data-state="不满足"] { color: #a03635; }
+[data-theme="light"] dl { border-color: #d3dfe0; }
+[data-theme="light"] :focus-visible { outline-color: #186788; }
 
-/* ---- 三步向导与货物图（新增：尺寸/重心/三维预览） ---- */
+/* 工况步骤与吊物轴测图 */
 .steps { display: flex; gap: 6px; list-style: none; margin: 0 0 4px; padding: 0; }
 .steps li { flex: 1; min-width: 0; }
 .steps button { width: 100%; display: flex; align-items: center; gap: 6px; justify-content: center; }
@@ -316,18 +312,12 @@ select:focus-visible {
 .cg-field { border: 1px solid #4b4e5c; border-radius: 8px; margin: 12px 0 6px; padding: 4px 10px 8px; }
 .cg-field legend { padding: 0 6px; font-size: 12px; color: #c6c4dd; }
 .cg-field .warn, .warn { color: #ffb4a8; }
-.mode-cards { display: grid; gap: 8px; margin-bottom: 8px; }
-.mode-card { display: flex; flex-direction: column; gap: 3px; align-items: flex-start; padding: 12px; text-align: left; }
-.mode-card span { font-size: 12px; color: #a9abb6; }
-.mode-card.active { border-color: #9e99cf; box-shadow: inset 0 0 0 1px #9e99cf; }
 .summary { font-size: 12px; color: #b5b6c0; margin: 0 0 10px; line-height: 1.6; }
 button.link { padding: 0 2px; border: 0; background: none; color: #b8b3ed; text-decoration: underline; }
 .stage-title { padding: 8px 12px; border-bottom: 1px solid #41434e; }
 .load3d { display: flex; flex-direction: column; flex: 1; min-height: 0; color: #33404d; }
-.load3d-bar { display: flex; align-items: center; gap: 10px; padding: 6px 12px; border-bottom: 1px solid #41434e; }
-.load3d-bar button { margin-left: auto; }
-.load3d-svg { flex: 1; min-height: 0; width: 100%; touch-action: none; cursor: grab; user-select: none; }
-.load3d-svg.dragging { cursor: grabbing; }
+.load3d-svg { flex: 1; min-height: 0; width: 100%; user-select: none; }
+.load3d .plumb { stroke: #6b7986; stroke-dasharray: 5 4; stroke-width: 1.2; }
 .load3d-foot { display: flex; gap: 16px; padding: 6px 12px; font-size: 12px; color: #4c6570; border-top: 1px solid #41434e; }
 .load3d .axis line { stroke: #2c7a58; color: #2c7a58; stroke-width: 1.2; stroke-dasharray: 8 3 1 3; }
 .load3d .axis text { fill: #2c7a58; font-size: 12px; }
@@ -338,28 +328,35 @@ button.link { padding: 0 2px; border: 0; background: none; color: #b8b3ed; text-
 .load3d .sling circle.hook { fill: #b03a30; }
 .load3d .sling .hook-label { fill: #b03a30; font-size: 12px; }
 .load3d .dims text { fill: #2c7a58; font-size: 13px; }
-.load3d .cg-circle { fill: #fffefb; stroke: #193544; stroke-width: 1.4; }
+.load3d .cg-circle { fill: #ffffff; stroke: #193544; stroke-width: 1.4; }
 .load3d .cg-fill { fill: #193544; }
 .load3d .cg-cross { stroke: #193544; stroke-width: 1; }
 .load3d .cg text { fill: #193544; font-size: 13px; }
 .load3d .cg line { stroke: #8a97a1; }
 .stage .load3d { background: #f2f6f4; }
-[data-theme="refract"] .hint { background: #eef4f7; border-color: #4d7f96; color: #2f4f5f; }
-[data-theme="refract"] .cg-field { border-color: #cddadb; }
-[data-theme="refract"] .cg-field legend { color: #314f5e; }
-[data-theme="refract"] .steps b { background: #dbe6e7; color: #3a5563; }
-[data-theme="refract"] .steps li.active b { background: #175978; color: #fff; }
-[data-theme="refract"] .stage .load3d { background: #f4f8f5; }
-[data-theme="refract"] .load3d-foot { color: #4c6570; border-color: #d0dcdd; }
-[data-theme="refract"] .stage-title { border-color: #d0dcdd; }
-[data-theme="dusk"] .hint { background: #2a2d38; border-color: #9e99cf; color: #c9cad4; }
-[data-theme="dusk"] .stage .load3d { background: #1d2027; color: #d6dae0; }
-[data-theme="dusk"] .load3d .box line { stroke: #c9d1d8; }
-[data-theme="dusk"] .load3d .box line.hidden { stroke: #6c7681; }
-[data-theme="dusk"] .load3d .cg-circle { fill: #1d2027; stroke: #dfe7ec; }
-[data-theme="dusk"] .load3d .cg-fill { fill: #dfe7ec; }
-[data-theme="dusk"] .load3d .cg-cross { stroke: #dfe7ec; }
-[data-theme="dusk"] .load3d .cg text { fill: #dfe7ec; }
-[data-theme="dusk"] .load3d .axis text, [data-theme="dusk"] .load3d .dims text { fill: #7fceac; }
-[data-theme="dusk"] .load3d .axis line { stroke: #7fceac; color: #7fceac; }
+[data-theme="light"] .hint { background: #eef4f7; border-color: #4d7f96; color: #2f4f5f; }
+[data-theme="light"] .cg-field { border-color: #cddadb; }
+[data-theme="light"] .cg-field legend { color: #314f5e; }
+[data-theme="light"] .steps b { background: #dbe6e7; color: #3a5563; }
+[data-theme="light"] .steps li.active b { background: #175978; color: #fff; }
+[data-theme="light"] .stage .load3d { background: #f9fafb; }
+[data-theme="light"] .load3d-foot { color: #4c6570; border-color: #d0dcdd; }
+[data-theme="light"] .stage-title { border-color: #d0dcdd; }
+[data-theme="dark"] .hint { background: #2a2d38; border-color: #9e99cf; color: #c9cad4; }
+[data-theme="dark"] .stage .load3d { background: #1d2027; color: #d6dae0; }
+[data-theme="dark"] .load3d .box line { stroke: #c9d1d8; }
+[data-theme="dark"] .load3d .box line.hidden { stroke: #6c7681; }
+[data-theme="dark"] .load3d .cg-circle { fill: #1d2027; stroke: #dfe7ec; }
+[data-theme="dark"] .load3d .cg-fill { fill: #dfe7ec; }
+[data-theme="dark"] .load3d .cg-cross { stroke: #dfe7ec; }
+[data-theme="dark"] .load3d .cg text { fill: #dfe7ec; }
+[data-theme="dark"] .load3d .axis text, [data-theme="dark"] .load3d .dims text { fill: #7fceac; }
+[data-theme="dark"] .load3d .axis line { stroke: #7fceac; color: #7fceac; }
 .load3d .cg-tag { font-weight: 600; }
+
+[data-theme="light"] .summary { color: #405469; }
+[data-theme="light"] .steps li.active button { color: #164e6d; border-color: #4683a1; }
+[data-theme="light"] .warn { color: #96372f; }
+[data-theme="dark"] .load3d-foot { color: #b5c5cf; }
+[data-theme="dark"] .load3d .sling :is(line, circle) { stroke: #ff9d87; }
+[data-theme="dark"] .load3d .sling :is(.hook, .hook-label) { fill: #ff9d87; }

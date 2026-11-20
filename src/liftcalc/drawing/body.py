@@ -24,7 +24,6 @@ MODEL_REAR = 3.45                      # 车尾（参考图 x=64 px）距回转�
 BODY_MODEL_FRONT = TRACE_M - MODEL_REAR  # 车头前沿距回转中心 = 9.55 m
 GROUND_PX = 328.0                      # 参考图上地面线的 y
 WHEEL_R = 0.64                         # 轮胎半径（按参考图轮拱约 1.28 m 直径）
-RAM_BASE = (MODEL_REAR - (309 - 64) / PX_PER_M, (GROUND_PX - 166) / PX_PER_M)
 
 # 每个轴数的轴距范围（参考图 px），取够放下 n 个 1.28 m 轮胎且不互相盖住
 AXLE_SPANS = {4: (209.0, 726.0), 5: (209.0, 726.0), 6: (196.0, 784.0), 8: (168.0, 862.0)}
@@ -127,27 +126,23 @@ def draw_truck(figure: Figure, paper, axles: int | None, hinge: tuple[float, flo
                  (station + 23, 236), (station + 43, 256), (station + 48, 275)),
                 closed=False, fine=True)
 
-    # 平台 / 操纵室
-    panel(246, 184, 421, 194, False)
-    contour(((193, 149), (203, 142), (223, 89), (285, 85), (301, 138),
-             (288, 183), (196, 183)))
-    contour(((208, 139), (228, 96), (254, 95), (254, 135)), fine=True)
-    contour(((265, 95), (282, 95), (290, 131), (265, 134)), fine=True)
-    detail((199, 153), (290, 142))
-    detail((200, 172), (282, 172))
-    # 回转台与配重
-    contour(((293, 183), (301, 151), (377, 117), (387, 108), (511, 109),
-             (526, 120), (526, 185)))
-    detail((379, 180), (385, 119), (471, 119), (471, 180))
-    detail((495, 121), (495, 173))
-    contour(((313, 147), (443, 92), (478, 89), (483, 100), (331, 162),
-             (324, 180), (299, 180)))
-    # 臂架搁架 + 铰点（接到模型铰点，保证与臂架对齐）
-    contour(((383, 107), (383, 81), (455, 81), (468, 70), (616, 70),
-             (619, 113), (532, 113), (519, 106), (487, 106), (472, 115)))
-    figure.add(Circle(*point(561, 94), 0.16 * paper.s, LAYER_THIN))
-    pin_x, pin_y = hinge
-    saddle = (point(455, 81), paper(pin_x - .29, pin_y + .08),
-              paper(pin_x - .14, pin_y + .29), paper(pin_x + .17, pin_y + .29),
-              paper(pin_x + .30, pin_y + .06), point(383, 107))
-    figure.add(Polyline(saddle, True, LAYER_OUTLINE))
+    # 回转平台落在底盘上；臂根销轴和座板共用性能表推导的铰点。
+    panel(175, 182, 682, 194, False)
+    hx, hy = hinge
+    pedestal = (point(186, 182), point(186, 132),
+                paper(hx + .43, hy - .24), paper(hx + .39, hy + .16),
+                paper(hx + .17, hy + .38), paper(hx - .17, hy + .38),
+                paper(hx - .43, hy + .10), paper(hx - .48, hy - .45),
+                point(505, 126), point(540, 135), point(540, 182))
+    figure.add(Polyline(pedestal, True, LAYER_OUTLINE))
+    panel(201, 142, 250, 170)
+    for level in (149, 156, 163):
+        detail((207, level), (244, level))
+
+    # 上车操纵室位于主臂座靠车头的一侧，窗框、门线与室体一起前移。
+    contour(((560, 182), (558, 128), (574, 92), (581, 87),
+             (638, 84), (647, 89), (666, 138), (660, 182)))
+    contour(((565, 133), (581, 96), (605, 94), (605, 132)), fine=True)
+    contour(((614, 94), (636, 92), (652, 130), (614, 132)), fine=True)
+    detail((562, 146), (658, 139))
+    detail((613, 139), (613, 174), (652, 174))

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 
 const props = withDefaults(
   defineProps<{
@@ -14,54 +14,31 @@ const props = withDefaults(
   { cg: () => ({ x: 0, y: 0, z: 0 }), slingHeight: 3.2, inset: 0, weight: 0 },
 )
 
-const yaw = ref(34)
-const pitch = ref(22)
-const dragging = ref(false)
-let last: { x: number; y: number } | null = null
-
-function down(event: PointerEvent) {
-  if (event.button !== 0) return
-  ;(event.target as Element).setPointerCapture?.(event.pointerId)
-  last = { x: event.clientX, y: event.clientY }
-  dragging.value = true
-}
-function move(event: PointerEvent) {
-  if (!last) return
-  yaw.value += (event.clientX - last.x) * 0.45
-  pitch.value = Math.max(6, Math.min(58, pitch.value + (event.clientY - last.y) * 0.3))
-  last = { x: event.clientX, y: event.clientY }
-}
-function up() {
-  last = null
-  dragging.value = false
-}
-function reset() {
-  yaw.value = 34
-  pitch.value = 22
-}
+const yaw = 34 * Math.PI / 180
+const pitch = 21 * Math.PI / 180
 
 const VIEW_W = 720
 const VIEW_H = 430
 
 function project(x: number, y: number, z: number): [number, number] {
-  const cy = Math.cos((yaw.value * Math.PI) / 180)
-  const sy = Math.sin((yaw.value * Math.PI) / 180)
-  const cp = Math.cos((pitch.value * Math.PI) / 180)
-  const sp = Math.sin((pitch.value * Math.PI) / 180)
+  const cy = Math.cos(yaw)
+  const sy = Math.sin(yaw)
+  const cp = Math.cos(pitch)
+  const sp = Math.sin(pitch)
   const u = x * cy - y * sy
   const depth = x * sy + y * cy
   return [u, z * cp + depth * sp]
 }
 
 const model = computed(() => {
-  const L = Math.max(0.1, props.length)
-  const B = Math.max(0.1, props.width)
-  const H = Math.max(0.1, props.height)
+  const L = props.length
+  const B = props.width
+  const H = props.height
   const hx = L / 2
   const hy = B / 2
   const hz = H / 2
-  const inset = Math.min(Math.max(0, props.inset), Math.min(hx, hy) - 0.05)
-  const apex = { x: 0, y: 0, z: hz + Math.max(0.2, props.slingHeight) }
+  const inset = props.inset
+  const apex = { x: props.cg.x, y: props.cg.y, z: hz + props.slingHeight }
   const lugs = [
     { x: hx - inset, y: hy - inset, z: hz },
     { x: -(hx - inset), y: hy - inset, z: hz },
@@ -72,7 +49,7 @@ const model = computed(() => {
   const axis = Math.max(hx, hy) * 1.85 + 0.3
   const axisZ = apex.z + 0.9
 
-  const pts = [apex, ...lugs, ...corners, { x: axis, y: 0, z: 0 }, { x: 0, y: axis, z: 0 }, { x: 0, y: 0, z: axisZ }]
+  const pts = [...lugs.map((p) => ({ ...p, z: apex.z })), ...corners, { x: axis, y: 0, z: 0 }, { x: 0, y: axis, z: 0 }, { x: 0, y: 0, z: axisZ }]
   const projected = pts.map((p) => project(p.x, p.y, p.z))
   const us = projected.map((p) => p[0])
   const vs = projected.map((p) => p[1])
@@ -126,21 +103,11 @@ const model = computed(() => {
 
 <template>
   <div class="load3d">
-    <div class="load3d-bar">
-      <strong>货物图</strong>
-      <span class="muted">按住拖动可旋转 · {{ yaw.toFixed(0) }}° / {{ pitch.toFixed(0) }}°</span>
-      <button type="button" @click="reset">复位</button>
-    </div>
     <svg
       :viewBox="`0 0 ${VIEW_W} ${VIEW_H}`"
       class="load3d-svg"
-      :class="{ dragging }"
       role="img"
       aria-label="吊物三维示意：长方体、坐标轴与重心"
-      @pointerdown="down"
-      @pointermove="move"
-      @pointerup="up"
-      @pointercancel="up"
     >
       <defs>
         <marker id="axis-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
@@ -162,6 +129,7 @@ const model = computed(() => {
           :class="{ hidden: edge.hidden }"
         />
       </g>
+      <line class="plumb" :x1="model.hook.x" :y1="model.hook.y" :x2="model.cg.x" :y2="model.cg.y" />
       <g class="sling">
         <line v-for="(sling, index) in model.slings" :key="index" :x1="sling.a.x" :y1="sling.a.y" :x2="sling.b.x" :y2="sling.b.y" />
         <circle v-for="(sling, index) in model.slings" :key="`lug-${index}`" :cx="sling.lug.x" :cy="sling.lug.y" r="4" />

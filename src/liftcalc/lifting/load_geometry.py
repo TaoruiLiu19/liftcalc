@@ -10,8 +10,8 @@
 重心用相对形心的偏移 ``(cg_x, cg_y, cg_z)`` 描述，这是现场最容易核对的写法
 （偏心量直接量自形心）。
 
-四个吊点默认在顶面四角，可用 ``lug_inset`` 向形心内缩。吊钩位于四吊点形心
-（也就是吊物形心）正上方，吊索从吊钩接到四个吊点。
+四个吊点默认在顶面四角，可用 ``lug_inset`` 向形心内缩。水平吊装时，
+吊钩位于吊物重心正上方，吊索从吊钩接到四个固定吊点。
 
 索力模型（静力、线分配，与支腿反力同一套假定）::
 
@@ -22,8 +22,7 @@
 形心的偏心，``run_i`` 为吊点在水平面上到吊钩投影的距离。偏心时四根索受力不同，
 这就是"重心偏心时四根索力不均"的来源。
 
-该模型假定吊钩位于吊点形心正上方、吊物保持水平。重心偏心时吊物实际会倾斜到
-重心落到吊钩正下方为止；倾斜量由现场倒链调平消除，本模块在 ``notes`` 里写明。
+索长按调平后的几何位置计算；四索的竖向分担采用上式假定。
 """
 
 from __future__ import annotations
@@ -89,7 +88,7 @@ class LoadShape:
 
     def default_sling_height(self) -> float:
         """按最短索与水平成 60° 推算吊索竖向高度。"""
-        run = math.hypot(self.lug_x, self.lug_y)
+        run = math.hypot(self.lug_x - abs(self.cg_x), self.lug_y - abs(self.cg_y))
         return run * math.tan(math.radians(DEFAULT_SLING_ANGLE_TO_HORIZONTAL))
 
 
@@ -179,7 +178,7 @@ def sling_report(shape: LoadShape, weight_t: float) -> SlingReport:
         sx = 1.0 if lug.x > 0 else -1.0
         sy = 1.0 if lug.y > 0 else -1.0
         share = quarter * (1 + sx * fx) * (1 + sy * fy)
-        run = math.hypot(lug.x, lug.y)
+        run = math.hypot(lug.x - shape.cg_x, lug.y - shape.cg_y)
         angle = math.degrees(math.atan2(run, height))
         force = share / math.cos(math.radians(angle))
         items.append(
@@ -216,8 +215,7 @@ def sling_report(shape: LoadShape, weight_t: float) -> SlingReport:
         )
     if abs(shape.cg_x) > CG_TOL or abs(shape.cg_y) > CG_TOL:
         notes.append(
-            "重心偏心时吊物自由悬挂会倾斜到重心位于吊钩正下方；本计算按吊钩位于吊点"
-            "形心正上方、吊物保持水平作静力分配，倾斜量应由倒链调平消除"
+            "按吊物水平、吊钩位于重心正上方计算各索长度和夹角；四索分担采用静力分配假定。"
         )
 
     return SlingReport(
