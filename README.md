@@ -8,9 +8,11 @@
 
 ## Windows 单机桌面工作台
 
-![单机吊装工作台，QY70K-1 查表与四轴立面](docs/handover/assets/dusk-single.png)
+![单机吊装工作台，QY70K-1 查表与四轴立面](docs/handover/assets/refract-single.png)
 
-[查看桌面 CAD 核图界面](docs/handover/assets/dusk-cad.png)
+工作台默认使用 Refract 浅色主题，右上角可切换 Dusk 深色主题。点击吊装示意图可打开大图，使用 ＋、− 查看局部细节，按 Esc 或点击“关闭”返回。
+
+[查看只读 CAD 核图界面](docs/handover/assets/refract-cad.png)
 
 在安装 Python 3.12 或更高版本、Microsoft Edge WebView2 运行时的 Windows 电脑上，双击仓库根目录的 `启动单机工作台.cmd`。首次启动会在项目的 `.venv` 中安装桌面依赖，需要联网。以后可离线启动。界面和 CAD 资源随仓库提供。
 

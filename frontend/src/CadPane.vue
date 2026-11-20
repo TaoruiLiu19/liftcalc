@@ -26,16 +26,20 @@ async function open(source: File | Snapshot) {
   try {
     const cad = await import('@mlightcad/cad-simple-viewer')
     cad.AcApI18n.setCurrentLocale('zh')
-    if (!manager)
+    if (!manager) {
       manager = cad.AcApDocManager.createInstance({
         container: host.value,
         autoResize: true,
         baseUrl: location.origin + '/',
         builtinOpenFileDialog: false,
+        notificationCenter: false,
         webworkerFileUrls: {
           mtextRender: location.origin + '/assets/mtext-renderer-worker.js',
         },
       })
+      // Navigation and measurement use view APIs directly. No interactive commands are needed.
+      manager?.commandManager.removeAll()
+    }
     if (!manager) throw Error('WebGL 不可用，请检查 WebView2 或显示驱动')
     let bytes: ArrayBuffer, filename: string
     if (source instanceof File) {
@@ -81,6 +85,9 @@ async function open(source: File | Snapshot) {
   } finally {
     busy.value = false
   }
+}
+function navigationOnly(event: MouseEvent) {
+  if (event.button !== 1) event.stopPropagation()
 }
 function fit() {
   manager?.curView.zoomToFitDrawing()
@@ -182,7 +189,9 @@ onMounted(() => {
       </details>
     </div>
     <div class="viewport">
-      <div class="gl" ref="host" @click.capture="point"></div>
+      <div class="gl" ref="host" @click.capture.stop="point" @contextmenu.capture.prevent.stop
+        @dblclick.capture.prevent.stop @pointerdown.capture="navigationOnly"
+        @mousedown.capture="navigationOnly" @dragover.prevent @drop.capture.prevent.stop></div>
       <div v-if="busy || name === '未打开图纸'" class="cover">
         {{
           busy

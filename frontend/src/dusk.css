@@ -291,3 +291,45 @@ select:focus-visible {
 [hidden] {
   display: none !important;
 }
+
+.theme-select { width: auto; margin: 0; }
+.sheet-open { width: 100%; height: 100%; min-height: 0; padding: 0; border: 0; background: transparent; cursor: zoom-in; }
+.sheet-dialog { width: 94vw; height: 92vh; padding: 0; border: 1px solid #78808a; border-radius: 12px; }
+.sheet-dialog[open] { display: flex; flex-direction: column; }
+.sheet-dialog::backdrop { background: rgb(10 22 30 / 70%); }
+.sheet-bar { display: flex; align-items: center; gap: 8px; padding: 10px 16px; }
+.sheet-bar strong { margin-right: auto; }
+.sheet-scroll { flex: 1; min-height: 0; overflow: auto; background: #d4dbdc; }
+.sheet-scroll svg { display: block; width: 100%; height: 100%; }
+.gl .ml-cli-container, .gl .ml-ui-shortcut-toolbar-shell, .gl [role="toolbar"] { display: none !important; }
+
+/* Refract · daylight through glass, with pool-blue ink on warm plaster. */
+:root[data-theme="refract"] {
+  color-scheme: light;
+  color: #193544;
+  background: #f7f7f2;
+}
+[data-theme="refract"] body {
+  min-height: 100vh;
+  background: linear-gradient(113deg, transparent 55%, #dcece9 64%, #fffef6 65%, #dfedf0 67%, transparent 79%) top right / 100% 265px no-repeat;
+}
+[data-theme="refract"] header { background: #fcfcf7; border-color: #d0dcdd; }
+[data-theme="refract"] h1 { font-weight: 450; letter-spacing: -.035em; font-size: 30px; }
+[data-theme="refract"] :is(form, aside, .stage, .evidence, .sheet-dialog) {
+  background: #fffefb; border-color: #cddadb; border-radius: 16px;
+  box-shadow: 4px 12px 25px -18px #477b8b;
+}
+[data-theme="refract"] :is(.eyebrow,.muted,footer,.caption,.evidence span,dt,header small,.tag) { color: #4c6570; }
+[data-theme="refract"] :is(summary,label) { color: #314f5e; }
+[data-theme="refract"] :is(select,input:not([type=checkbox]),button,.layers) { background: #fafcfb; color: #203f4e; border-color: #aec3c8; }
+[data-theme="refract"] :is(button.active,button:hover:not(:disabled),.chosen) { color: #133e55; background: #e1eff1; border-color: #50829a; }
+[data-theme="refract"] .primary { background: #175978; color: white; border-color: #175978; }
+[data-theme="refract"] .paper { background: #e4edec; }
+[data-theme="refract"] button.sheet-open { background: transparent; }
+[data-theme="refract"] .cover { color: #e8eeee; }
+[data-theme="refract"] .status { color: #875d1a; }
+[data-theme="refract"] .status[data-state="满足"] { color: #16644f; }
+[data-theme="refract"] .status[data-state="不满足"] { color: #a03635; }
+[data-theme="refract"] :is(dl,td,th) { border-color: #d3dfe0; }
+[data-theme="refract"] th { background: #eff5f3; }
+[data-theme="refract"] :focus-visible { outline-color: #186788; }

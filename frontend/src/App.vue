@@ -10,6 +10,14 @@ import {
 } from 'vue'
 import type { Snapshot, Cell, Model } from './types'
 const CadPane = defineAsyncComponent(() => import('./CadPane.vue'))
+const theme = ref('refract')
+watch(theme, value => { document.documentElement.dataset.theme = value }, { immediate: true })
+const sheetDialog = ref<HTMLDialogElement>()
+const sheetZoom = ref(1)
+function enlargeSheet() {
+  sheetZoom.value = 1
+  sheetDialog.value?.showModal()
+}
 const models = ref<Model[]>([]),
   snapshot = ref<Snapshot | null>(null),
   busy = ref(false),
@@ -125,6 +133,7 @@ async function save(fmt: string) {
   <header>
     <b>Liftcalc</b><span class="divider"></span><span>吊装复核工作台</span
     ><small>● 本机离线</small>
+    <select class="theme-select" aria-label="界面主题" v-model="theme"><option value="refract">Refract</option><option value="dusk">Dusk</option></select>
   </header>
   <main>
     <div class="heading">
@@ -252,12 +261,12 @@ async function save(fmt: string) {
           </button>
         </nav>
         <div v-show="tab === 'sheet'" class="paper">
-          <div v-if="snapshot?.svg" v-html="snapshot.svg"></div>
+          <button v-if="snapshot?.svg" class="sheet-open" aria-label="放大吊装示意图" title="放大吊装示意图" @click="enlargeSheet" v-html="snapshot.svg"></button>
           <p v-else>尚无可显示的工况立面</p>
         </div>
         <CadPane v-if="usedCad" v-show="tab === 'cad'" :snapshot="snapshot" />
         <div v-if="tab === 'sheet'" class="caption">
-          A3 立面 · 图示姿态不等于现场净空校核
+          点击图纸放大 · A3 立面 · 图示姿态不等于现场净空校核
         </div>
       </section>
       <aside>
@@ -344,5 +353,14 @@ async function save(fmt: string) {
       </div>
     </details>
     <footer>仅供学习与专业复核，不作为工程实施依据。</footer>
+    <dialog v-if="snapshot?.svg" ref="sheetDialog" class="sheet-dialog" aria-label="吊装示意图放大查看">
+      <div class="sheet-bar"><strong>吊装示意图</strong>
+        <button aria-label="缩小" :disabled="sheetZoom <= 1" @click="sheetZoom -= 0.5">−</button>
+        <button title="适合窗口" @click="sheetZoom = 1">{{ sheetZoom * 100 }}%</button>
+        <button aria-label="放大" :disabled="sheetZoom >= 4" @click="sheetZoom += 0.5">＋</button>
+        <button autofocus @click="sheetDialog?.close()">关闭</button>
+      </div>
+      <div class="sheet-scroll"><div :style="{width: sheetZoom * 100 + '%', height: sheetZoom * 100 + '%'}" v-html="snapshot.svg"></div></div>
+    </dialog>
   </main>
 </template>
