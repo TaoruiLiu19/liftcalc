@@ -1,13 +1,4 @@
 export type Model = { brand: string; model: string; config: string }
-export type Cell = {
-  config: string
-  boom_len: number
-  radius: number
-  rated_load: number
-  lift_height: number | null
-  reason: string
-  source_ref: string
-}
 export type Snapshot = {
   id: string
   svg: string | null
@@ -18,7 +9,6 @@ export type Snapshot = {
     config: string | null
     status: string
     explanation: string
-    records: Cell[]
     required: number
     rated_load: number | null
     boom_len: number | null

@@ -2,14 +2,13 @@
 import {
   computed,
   defineAsyncComponent,
-  nextTick,
   onMounted,
   reactive,
   ref,
   watch,
 } from 'vue'
 import SheetViewer from './SheetViewer.vue'
-import type { Snapshot, Cell, Model } from './types'
+import type { Snapshot, Model } from './types'
 const CadPane = defineAsyncComponent(() => import('./CadPane.vue'))
 const theme = ref('refract')
 watch(theme, value => { document.documentElement.dataset.theme = value }, { immediate: true })
@@ -19,8 +18,7 @@ const models = ref<Model[]>([]),
   busy = ref(false),
   notice = ref(''),
   tab = ref('sheet'),
-  usedCad = ref(false),
-  evidence = ref(false)
+  usedCad = ref(false)
 const form = reactive({
   model: 'QY70K-1',
   config: '',
@@ -59,14 +57,6 @@ watch(
     form.config = ''
   },
 )
-function chosen(row: Cell) {
-  return (
-    row.reason === '满足' &&
-    cap.value?.max_radius === row.radius &&
-    cap.value?.boom_len === row.boom_len &&
-    (cap.value?.config || '') === row.config
-  )
-}
 async function calculate() {
   const id = revision
   busy.value = true
@@ -110,11 +100,6 @@ onMounted(() => {
   if (window.pywebview?.api) void init()
   else window.addEventListener('pywebviewready', init, { once: true })
 })
-async function locate() {
-  evidence.value = true
-  await nextTick()
-  document.querySelector('tr.chosen')?.scrollIntoView({ block: 'nearest' })
-}
 async function save(fmt: string) {
   if (!snapshot.value) return
   try {
@@ -127,124 +112,149 @@ async function save(fmt: string) {
 </script>
 <template>
   <header>
-    <b>Liftcalc</b><span class="divider"></span><span>吊装复核工作台</span
+    <b>Liftcalc</b><span class="divider"></span><span>单机吊装复核</span
     ><small>● 本机离线</small>
     <select class="theme-select" aria-label="界面主题" v-model="theme"><option value="refract">Refract</option><option value="dusk">Dusk</option></select>
   </header>
   <main>
-    <div class="heading">
-      <div>
-        <p class="eyebrow">起重工程　/　能力反查</p>
-        <h1>单机吊装复核</h1>
-      </div>
-      <span class="tag">原厂表逐格选取 · 不插值</span>
-    </div>
     <div class="workspace">
-      <form @submit.prevent="calculate">
-        <h2>工况输入</h2>
-        <label
-          >机型<select v-model="form.model">
-            <option v-for="model in choices">{{ model }}</option>
-          </select></label
-        ><label
-          >性能表配置<select v-model="form.config">
-            <option value="">比较全部配置</option>
-            <option v-for="item in configs" :value="item.config">
-              {{ item.config }}
-            </option>
-          </select></label
-        ><label
-          >查表方式<select v-model="form.mode">
-            <option>最远幅度</option>
-            <option>指定幅度</option>
-          </select></label
-        >
-        <label v-if="form.mode === '指定幅度'"
-          >指定幅度 / m<input
-            required
-            type="number"
-            step="any"
-            min=".001"
-            v-model="form.radius"
-        /></label>
-        <div class="pair">
+      <div class="inspector">
+        <form @submit.prevent="calculate">
+          <h2>工况输入</h2>
           <label
-            >吊件 / t<input
+            >机型<select v-model="form.model">
+              <option v-for="model in choices">{{ model }}</option>
+            </select></label
+          ><label
+            >性能表配置<select v-model="form.config">
+              <option value="">比较全部配置</option>
+              <option v-for="item in configs" :value="item.config">
+                {{ item.config }}
+              </option>
+            </select></label
+          ><label
+            >查表方式<select v-model="form.mode">
+              <option>最远幅度</option>
+              <option>指定幅度</option>
+            </select></label
+          >
+          <label v-if="form.mode === '指定幅度'"
+            >指定幅度 / m<input
               required
               type="number"
               step="any"
               min=".001"
-              v-model="form.payload" /></label
-          ><label
-            >吊钩 / t<input
-              type="number"
-              step="any"
-              min="0"
-              placeholder="机型库"
-              v-model="form.hook"
+              v-model="form.radius"
           /></label>
-          <label
-            >索具 / t<input
-              required
-              type="number"
-              step="any"
-              min="0"
-              v-model="form.rigging" /></label
-          ><label
-            >要求钩高 / m<input
-              type="number"
-              step="any"
-              min="0"
-              placeholder="不限"
-              v-model="form.height"
-          /></label>
-        </div>
-        <details>
-          <summary>系数与图示尺寸</summary>
           <div class="pair">
             <label
-              >动载系数<input
+              >吊件 / t<input
                 required
                 type="number"
                 step="any"
                 min=".001"
-                v-model="form.factor" /></label
+                v-model="form.payload" /></label
             ><label
-              >负荷率上限<input
-                required
+              >吊钩 / t<input
                 type="number"
                 step="any"
-                min=".001"
-                max="1"
-                v-model="form.limit" /></label
-            ><label
-              >吊物宽 / m<input
-                required
-                type="number"
-                step="any"
-                min=".01"
-                v-model="form.width" /></label
-            ><label
-              >吊物高 / m<input
-                required
-                type="number"
-                step="any"
-                min=".01"
-                v-model="form.loadHeight" /></label
-            ><label
-              >图示净空 / m<input
+                min="0"
+                placeholder="机型库"
+                v-model="form.hook"
+            /></label>
+            <label
+              >索具 / t<input
                 required
                 type="number"
                 step="any"
                 min="0"
-                v-model="form.clearance"
+                v-model="form.rigging" /></label
+            ><label
+              >要求钩高 / m<input
+                type="number"
+                step="any"
+                min="0"
+                placeholder="不限"
+                v-model="form.height"
             /></label>
           </div>
-        </details>
-        <button class="primary" :disabled="busy || !models.length">
-          {{ busy ? '查表中…' : '计算并生成图纸' }}
-        </button>
-      </form>
+          <details>
+            <summary>系数与图示尺寸</summary>
+            <div class="pair">
+              <label
+                >动载系数<input
+                  required
+                  type="number"
+                  step="any"
+                  min=".001"
+                  v-model="form.factor" /></label
+              ><label
+                >负荷率上限<input
+                  required
+                  type="number"
+                  step="any"
+                  min=".001"
+                  max="1"
+                  v-model="form.limit" /></label
+              ><label
+                >吊物宽 / m<input
+                  required
+                  type="number"
+                  step="any"
+                  min=".01"
+                  v-model="form.width" /></label
+              ><label
+                >吊物高 / m<input
+                  required
+                  type="number"
+                  step="any"
+                  min=".01"
+                  v-model="form.loadHeight" /></label
+              ><label
+                >图示净空 / m<input
+                  required
+                  type="number"
+                  step="any"
+                  min="0"
+                  v-model="form.clearance"
+              /></label>
+            </div>
+          </details>
+          <button class="primary" :disabled="busy || !models.length">
+            {{ busy ? '查表中…' : '计算并生成图纸' }}
+          </button>
+        </form>
+        <aside>
+          <h2>复核结果</h2>
+          <p class="status" :data-state="cap?.status">
+            {{ cap?.status || '待计算' }}
+          </p>
+          <span class="radius-label">采用幅度</span>
+          <strong class="metric"
+            >{{ cap?.max_radius ?? '—' }} <small>m</small></strong
+          >
+          <p>{{ cap?.explanation || '等待有效工况' }}</p>
+          <dl>
+            <dt>计算荷载</dt>
+            <dd>{{ cap?.required.toFixed(3) ?? '—' }} t</dd>
+            <dt>额定载荷</dt>
+            <dd>{{ cap?.rated_load ?? '—' }} t</dd>
+              <dt>采用臂长</dt>
+              <dd>{{ cap?.boom_len ?? '—' }} m</dd>
+              <dt>表档起升高度</dt>
+              <dd>{{ cap?.lift_height ?? '—' }} m</dd>
+            <dt>负荷率</dt>
+            <dd>
+              {{
+                cap?.utilization != null
+                  ? (cap.utilization * 100).toFixed(1) + '%'
+                  : '—'
+              }}
+            </dd>
+          </dl>
+          <p class="muted" v-for="w in snapshot?.warnings">{{ w }}</p>
+        </aside>
+      </div>
       <section class="stage">
         <nav>
           <button :class="{ active: tab === 'sheet' }" @click="tab = 'sheet'">
@@ -255,6 +265,16 @@ async function save(fmt: string) {
           >
             CAD 核图
           </button>
+          <div class="tools exports" aria-label="导出本次工况" role="group">
+            <span class="muted">导出本次工况</span>
+            <button
+              v-for="fmt in ['svg', 'dxf', 'png', 'docx']"
+              :key="fmt"
+              :disabled="!snapshot || (fmt !== 'docx' && !snapshot.svg)"
+              :title="'导出本次工况 ' + fmt.toUpperCase()"
+              @click="save(fmt)"
+            >{{ fmt.toUpperCase() }}</button>
+          </div>
         </nav>
         <div v-show="tab === 'sheet'" class="paper">
           <button v-if="snapshot?.svg" class="sheet-open" aria-label="放大吊装示意图" title="放大吊装示意图" @click="sheetViewer?.open()" v-html="snapshot.svg"></button>
@@ -265,89 +285,9 @@ async function save(fmt: string) {
           点击图纸放大 · A3 立面 · 图示姿态不等于现场净空校核
         </div>
       </section>
-      <aside>
-        <h2>复核结果</h2>
-        <p class="status" :data-state="cap?.status">
-          {{ cap?.status || '待计算' }}
-        </p>
-        <strong class="metric"
-          >{{ cap?.max_radius ?? '—' }} <small>m</small></strong
-        >
-        <p>{{ cap?.explanation || '等待有效工况' }}</p>
-        <dl>
-          <dt>计算荷载</dt>
-          <dd>{{ cap?.required.toFixed(3) ?? '—' }} t</dd>
-          <dt>额定载荷</dt>
-          <dd>{{ cap?.rated_load ?? '—' }} t</dd>
-            <dt>采用臂长</dt>
-            <dd>{{ cap?.boom_len ?? '—' }} m</dd>
-            <dt>表档起升高度</dt>
-            <dd>{{ cap?.lift_height ?? '—' }} m</dd>
-          <dt>负荷率</dt>
-          <dd>
-            {{
-              cap?.utilization != null
-                ? (cap.utilization * 100).toFixed(1) + '%'
-                : '—'
-            }}
-          </dd>
-        </dl>
-        <button :disabled="!cap" @click="locate">查看原厂格点 ↓</button>
-        <p class="muted" v-for="w in snapshot?.warnings">{{ w }}</p>
-        <h2>导出</h2>
-        <div class="tools">
-          <button
-            v-for="fmt in ['svg', 'dxf', 'png', 'docx']"
-            :disabled="!snapshot || (fmt !== 'docx' && !snapshot.svg)"
-            @click="save(fmt)"
-          >
-            {{ fmt.toUpperCase() }}
-          </button>
-        </div>
-      </aside>
+
     </div>
     <p role="status" v-if="notice">{{ notice }}</p>
-    <details
-      class="evidence"
-      :open="evidence"
-      @toggle="evidence = ($event.target as HTMLDetailsElement).open"
-    >
-      <summary>
-        原厂性能表　<span>{{ cap?.records.length ?? 0 }} 个候选格点</span>
-      </summary>
-      <div class="scroll">
-        <table>
-          <thead>
-            <tr>
-              <th
-                v-for="title in [
-                  '配置',
-                  '臂长 m',
-                  '幅度 m',
-                  '额定 t',
-                  '钩高 m',
-                  '判定',
-                  '来源',
-                ]"
-              >
-                {{ title }}
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="r in cap?.records" :class="{ chosen: chosen(r) }">
-              <td>{{ r.config }}</td>
-              <td>{{ r.boom_len }}</td>
-              <td>{{ r.radius }}</td>
-              <td>{{ r.rated_load }}</td>
-              <td>{{ r.lift_height ?? '—' }}</td>
-              <td>{{ chosen(r) ? '采用此档' : r.reason }}</td>
-              <td>{{ r.source_ref }}</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </details>
     <footer>仅供学习与专业复核，不作为工程实施依据。</footer>
     <SheetViewer v-if="snapshot?.svg" ref="sheetViewer" :svg="snapshot.svg" />
   </main>

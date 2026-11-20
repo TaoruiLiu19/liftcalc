@@ -111,7 +111,7 @@ def main():
         api = DesktopApi(Repo(db))
         api._window = webview.create_window(
             "Liftcalc · 单机吊装工作台", resources(), js_api=api,
-            width=1400, height=900, min_size=(1000, 650), background_color="#1b1d24",
+            maximized=True, width=1400, height=900, min_size=(1000, 650), background_color="#1b1d24",
         )
         try:
             webview.start(gui="edgechromium")
