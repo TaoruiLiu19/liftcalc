@@ -184,6 +184,9 @@ def build_db(pack_dir: Path, out_path: Path, data_version: str) -> BuildStats:
                         source_ref = (
                             f"{path.name} 第{row.source_page}页" if row.source_page else path.name
                         )
+                        source_doc = meta_row.get("source_doc") or ""
+                        if source_doc.startswith("https://") and row.source_page.isdecimal():
+                            source_ref = f"{source_doc}#page={row.source_page}"
                         conn.execute(
                             "INSERT INTO crane_capacity (config_id, radius, rated_load, boom_angle_deg,"
                             " lift_height_m, parts_of_line, source_ref) VALUES (?,?,?,?,?,?,?)",

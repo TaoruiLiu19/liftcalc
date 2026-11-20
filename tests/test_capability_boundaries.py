@@ -57,6 +57,25 @@ def test_model_without_table_is_refused(repo: Repo) -> None:
         run_case(_case("QAY300"), repo)
 
 
+def test_full_counterweight_chart_cells_keep_units_and_extension_codes(repo: Repo) -> None:
+    def cells(model, boom, radius):
+        return {row["config_name"]: row["rated_load"] for row in repo.model_capacity("徐工", model)
+                if row["boom_len"] == boom and row["radius"] == radius}
+
+    assert cells("XCT25L5_Y", 40.5, 32) == {
+        "全配重5.8t·支腿全伸5.23×6.4m·第五支腿支好·360°·主臂40.5m": 0.6,
+    }
+    assert cells("XCT60_Y", 44, 32) == {
+        "全配重6.5t·支腿全伸6.1×7.1m·第五支腿支好·360°·主臂44m": 1.1,
+    }
+    prefix = "全配重45t·支腿全伸8.45×7.9m·360°·伸缩码"
+    assert cells("XCT100_1", 18.3, 3) == {
+        f"{prefix}00100·主臂18.3m": 100.0,
+        f"{prefix}00010·主臂18.3m": 98.0,
+        f"{prefix}00001·主臂18.3m": 70.3,
+    }
+
+
 def test_four_models_ranking(repo: Repo) -> None:
     """吨位越大，10 t 货能吊得越远。"""
     radii = {}
