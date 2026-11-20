@@ -987,8 +987,8 @@ def _capability_case(case: CapabilityCase, repo: Repo | None) -> ComputationResu
             "points": points_payload(left_points),
         }
     else:
-        if case.target_radius is not None or case.config is not None:
-            raise InputError("指定幅度与配置仅用于单机工作台")
+        if case.target_radius is not None or case.config is not None or case.required_lift_height is not None:
+            raise InputError("指定幅度、性能表配置和要求钩高仅适用于单机反查")
         if case.second is None:
             raise InputError("双机模式需要给出第二台机型 second")
         right_points = load_points(case.second)

@@ -101,6 +101,17 @@ def test_sany_full_counterweight_chart(repo, model, boom, radius, expected):
     assert sorted(cells.values()) == expected
 
 
+@pytest.mark.parametrize(("brand", "model"), [
+    ("三一", None), (None, "STC750"), ("徐工", "XCT100_1"), ("徐工", "STC750"),
+])
+def test_main_hook_filters_are_independent(repo: Repo, brand: str | None, model: str | None) -> None:
+    all_hooks = repo.main_hooks()
+    assert {row["brand"] for row in all_hooks} >= {"三一", "徐工"}
+    expected = [row for row in all_hooks if (brand is None or row["brand"] == brand)
+                and (model is None or row["model"] == model)]
+    assert repo.main_hooks(brand=brand, model=model) == expected
+
+
 def test_main_hook_options_follow_model_and_limit_suspended_load(repo: Repo) -> None:
     crane = {"brand": "三一", "model": "STC2000C8-8"}
     case = {"kind": "crane.capability", "crane": crane, "payload": 10}

@@ -23,6 +23,8 @@
 
 工作台采用 Vue 3、TypeScript、pywebview 和现有 Python 计算内核。修改界面后在 `frontend` 目录运行 `pnpm install --frozen-lockfile` 和 `pnpm run build`，将生成的 `src/liftcalc/dusk_static` 随源码一起提交。已安装桌面扩展的环境也可以运行 `python -m liftcalc.dusk`。
 
+桌面端提供单机复核。双机按比例分载使用下方 CLI 的 `--mode dual`。前端源码在 `frontend/src`，CAD 查看器及文字渲染 worker 的版本由 `frontend/pnpm-lock.yaml` 锁定。本次重建使用 Node.js 24.22.3 和 pnpm 11.25.0。
+
 ## 一、它能回答什么问题
 
 **问：10 吨货，我这台 70 吨车能吊多远？**
@@ -97,6 +99,9 @@ pip install pint numpy pydantic python-docx ezdxf typer PyYAML pytest hypothesis
 # 单机：10 吨货，QY70K-1
 .\liftcalc.ps1 capability --model QY70K-1 --payload 10 --hook 0.616 --rigging 0.3 --out out\cap.json
 
+# 单机：用 11.6 m 主臂核对 6 m 幅度、9 m 钩高
+.\liftcalc.ps1 capability --model QY70K-1 --payload 10 --config "主臂11.6m" --target-radius 6 --required-height 9
+
 # 双机：两台 QY70K-1 抬 20 吨，60/40 分配，不同步系数 1.1
 .\liftcalc.ps1 capability --mode dual --model QY70K-1 --second-model QY70K-1 `
     --payload 20 --hook 0.616 --rigging 0.5 --asynchronism 1.1 --out out\dual.json
@@ -111,9 +116,23 @@ pip install pint numpy pydantic python-docx ezdxf typer PyYAML pytest hypothesis
 | `--rigging` | 索具重量 t | 按 0 计 |
 | `--dynamic-factor` | 动载系数 | 默认 1.1 |
 | `--limit` | 负荷率上限 | 单机 0.90 / 双机 0.80 |
-| `--required-height` | 所需起升高度 m | 不做净空校核 |
+| `--target-radius` / `--radius` | 单机指定作业幅度 m。介于两档时用较大幅度档核载 | 查最远幅度 |
+| `--config` | 单机配置全名，可从结果的 `aux.capability.records[].config` 读取 | 比较全部配置 |
+| `--required-height` | 单机所需起升高度 m。同时指定幅度时，须有该位置的钩高数据 | 仅校核载荷 |
 | `--load-width` / `--load-height` | 图示吊物宽/高 m | 3.2 / 3.8（只影响立面图） |
 | `--clearance` | 图示吊物底距地净空 m | 1.0（只影响立面图） |
+
+`capability` 和 `calc` 的退出码如下。带 `--out` 时，退出码 0、1、6 都会写入结果 JSON。退出码 6 的具体原因另写入标准错误。
+
+| 退出码 | 含义 |
+|---:|---|
+| 0 | 校核通过，或纯数值计算（如截面属性）成功完成 |
+| 1 | 校核不满足 |
+| 2 | 输入或命令行参数错误 |
+| 3 | 数据库或基础数据错误 |
+| 4 | 超出计算定义域 |
+| 5 | 内部错误或启动环境错误 |
+| 6 | 吊装能力反查资料不足，例如缺少吊钩自重、指定幅度无表档覆盖或缺少该位置的钩高 |
 
 ### 3.4 出计算书
 

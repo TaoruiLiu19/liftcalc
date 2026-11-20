@@ -74,10 +74,16 @@ class Repo:
             query = """SELECT m.brand, m.model, h.mass_t, h.rated_t, h.is_default,
                               m.source_doc || '#page=' || h.source_page AS source_ref
                          FROM crane_main_hook h JOIN crane_model m ON m.id=h.model_id"""
-            params = ()
+            clauses = []
+            params = []
+            if brand is not None:
+                clauses.append("m.brand=?")
+                params.append(brand)
             if model is not None:
-                query += " WHERE m.brand=? AND m.model=?"
-                params = (brand, model)
+                clauses.append("m.model=?")
+                params.append(model)
+            if clauses:
+                query += " WHERE " + " AND ".join(clauses)
             return [dict(row) for row in conn.execute(query + " ORDER BY h.is_default DESC, h.rated_t DESC, h.mass_t DESC", params)]
 
     def model_capacity(self, brand: str, model: str) -> list[Row]:
