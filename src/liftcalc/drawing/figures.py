@@ -20,7 +20,6 @@ from liftcalc.drawing import dim as D
 from liftcalc.drawing import sheet as S
 from liftcalc.drawing.body import (
     BODY_MODEL_FRONT,
-    RAM_BASE,
     draw_truck,
     drawing_axles,
 )
@@ -420,20 +419,6 @@ def _draw_boom(figure: Figure, paper: _Paper, model: ElevationModel) -> None:
         figure.add(Line(*along(near + heel + .10, half * .64),
                         *along(far - collar, half * .64), LAYER_THIN))
 
-    base = paper(*RAM_BASE)
-    head = along(model.boom_len * .28, -_boom_half(.28) - .10)
-    dx, dy = head[0] - base[0], head[1] - base[1]
-    span = math.hypot(dx, dy)
-    def cylinder_point(fraction, width):
-        return (base[0] + dx * fraction - dy / span * width * paper.s,
-                base[1] + dy * fraction + dx / span * width * paper.s)
-
-    for start, end, width in ((0, .56, .20), (.56, 1, .105)):
-        figure.add(Polyline(tuple(cylinder_point(pos, side) for pos, side in
-                                  ((start, width), (end, width), (end, -width), (start, -width))),
-                            True, LAYER_OUTLINE))
-    pin(base, .18)
-    pin(head, .15)
     pin(along(0, 0), .26)
     pin(along(0, 0), .11)
     length = model.boom_len
