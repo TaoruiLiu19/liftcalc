@@ -57,9 +57,28 @@ class Repo:
         return rows[0]
 
     def workbench_models(self) -> list[Row]:
-        return self._rows('''SELECT DISTINCT m.brand, m.model, cfg.name AS config
+        models = self._rows('''SELECT DISTINCT m.brand, m.model, m.hook_main_t, cfg.name AS config
             FROM crane_model m JOIN crane_config cfg ON cfg.model_id=m.id
             JOIN crane_capacity c ON c.config_id=cfg.id ORDER BY m.brand, m.model, cfg.name''')
+        hooks = {}
+        for hook in self.main_hooks():
+            hooks.setdefault((hook["brand"], hook["model"]), []).append(hook)
+        for model in models:
+            model["main_hooks"] = hooks.get((model["brand"], model["model"]), [])
+        return models
+
+    def main_hooks(self, brand: str | None = None, model: str | None = None) -> list[Row]:
+        with self._connect() as conn:
+            if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='crane_main_hook'").fetchone():
+                return []  # Catalogs built before individual main hooks were recorded.
+            query = """SELECT m.brand, m.model, h.mass_t, h.rated_t, h.is_default,
+                              m.source_doc || '#page=' || h.source_page AS source_ref
+                         FROM crane_main_hook h JOIN crane_model m ON m.id=h.model_id"""
+            params = ()
+            if model is not None:
+                query += " WHERE m.brand=? AND m.model=?"
+                params = (brand, model)
+            return [dict(row) for row in conn.execute(query + " ORDER BY h.is_default DESC, h.rated_t DESC, h.mass_t DESC", params)]
 
     def model_capacity(self, brand: str, model: str) -> list[Row]:
         sql = """

@@ -805,7 +805,15 @@ def _capability_case(case: CapabilityCase, repo: Repo | None) -> ComputationResu
         model_row = repo.crane_model(case.crane.brand, case.crane.model)
     except DataError:
         model_row = None
-    if hook_mass == 0.0 and model_row is not None and model_row.get("hook_main_t"):
+    hooks = repo.main_hooks(case.crane.brand, case.crane.model) if case.mode == "single" else []
+    if hook_mass == 0.0:
+        selected_hook = next((hook for hook in hooks if hook["is_default"]), None)
+    else:
+        selected_hook = next((hook for hook in hooks if hook["mass_t"] == hook_mass), None)
+    if selected_hook is not None:
+        hook_from_db = hook_mass == 0.0
+        hook_mass = selected_hook["mass_t"]
+    elif hook_mass == 0.0 and model_row is not None and model_row.get("hook_main_t"):
         hook_mass = float(model_row["hook_main_t"])
         hook_from_db = True
 
@@ -847,14 +855,15 @@ def _capability_case(case: CapabilityCase, repo: Repo | None) -> ComputationResu
         },
     }
     warnings: list[str] = []
-    if hook_from_db:
+    if selected_hook:
+        warnings.append(f"采用 {selected_hook['rated_t']:g} t 主钩，自重 {hook_mass:g} t。请核对实车吊钩及穿绳倍率。")
+    elif hook_from_db:
         warnings.append(
             f"未指定吊钩重量，已按机型库取主钩自重 {hook_mass:g} t 计入计算荷载"
         )
     elif hook_mass == 0.0:
         warnings.append(
-            "未提供吊钩重量，且机型库中没有该机型的主钩自重，本次计算荷载未含吊钩——"
-            "结果偏不安全，请补填吊钩重量后重新计算"
+            "请选择实车主钩，或按铭牌填写吊钩自重（吨）后重新计算。"
         )
     left_points = load_points(case.crane)
 
@@ -862,6 +871,8 @@ def _capability_case(case: CapabilityCase, repo: Repo | None) -> ComputationResu
         verdict, records, status, explanation = crane_capability.assess_single(
             left_points, required=required, limit=limit, height=case.required_lift_height,
             radius=case.target_radius, config=case.config, hook_known=hook_mass > 0,
+            hook_overload=(selected_hook is not None and
+                           case.payload + case.rigging * case.dynamic_factor > selected_hook["rated_t"] + crane_capability.TOL),
         )
         ok = verdict.ok
         checks.append(
@@ -956,6 +967,8 @@ def _capability_case(case: CapabilityCase, repo: Repo | None) -> ComputationResu
             "model": case.crane.model,
             "required": required,
             "hook_mass": hook_mass,
+            "hook_rated_t": selected_hook["rated_t"] if selected_hook else None,
+            "hook_source_ref": selected_hook["source_ref"] if selected_hook else None,
             "hook_from_db": hook_from_db,
             "limit": limit,
             "checked": len(records), "status": status, "explanation": explanation,

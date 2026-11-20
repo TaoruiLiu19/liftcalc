@@ -1,4 +1,5 @@
-export type Model = { brand: string; model: string; config: string }
+export type MainHook = { mass_t: number; rated_t: number; is_default: number }
+export type Model = { brand: string; model: string; config: string; hook_main_t: number | null; main_hooks: MainHook[] }
 export type Snapshot = {
   id: string
   svg: string | null
@@ -10,6 +11,8 @@ export type Snapshot = {
     status: string
     explanation: string
     required: number
+    hook_mass: number
+    hook_rated_t: number | null
     rated_load: number | null
     boom_len: number | null
     lift_height: number | null

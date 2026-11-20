@@ -101,6 +101,25 @@ def test_sany_full_counterweight_chart(repo, model, boom, radius, expected):
     assert sorted(cells.values()) == expected
 
 
+def test_main_hook_options_follow_model_and_limit_suspended_load(repo: Repo) -> None:
+    crane = {"brand": "三一", "model": "STC2000C8-8"}
+    case = {"kind": "crane.capability", "crane": crane, "payload": 10}
+    cap = run_case(case, repo).aux["capability"]
+    assert cap["ok"] and cap["hook_from_db"]
+    assert (cap["hook_mass"], cap["hook_rated_t"]) == (.735, 75)
+    assert cap["hook_source_ref"].endswith("#page=4")
+    overloaded = run_case({**case, "payload": 74, "rigging": 1}, repo).aux["capability"]
+    assert overloaded["status"] == "不满足" and "主钩额载" in overloaded["explanation"]
+
+    case["crane"] = {"brand": "三一", "model": "STC750"}
+    assert run_case(case, repo).aux["capability"]["status"] == "资料不足"
+    selected = run_case({**case, "hook_mass": .320}, repo).aux["capability"]
+    assert selected["ok"] and selected["hook_rated_t"] == 30
+    assert selected["required"] == pytest.approx(10.320)
+    manual = run_case({**case, "hook_mass": .735}, repo).aux["capability"]
+    assert manual["ok"] and manual["hook_rated_t"] is None
+
+
 def test_four_models_ranking(repo: Repo) -> None:
     """吨位越大，10 t 货能吊得越远。"""
     radii = {}

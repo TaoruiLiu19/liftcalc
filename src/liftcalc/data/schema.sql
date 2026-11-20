@@ -25,6 +25,16 @@ CREATE TABLE crane_model (
   UNIQUE (brand, model)
 );
 
+CREATE TABLE crane_main_hook (
+  model_id INTEGER NOT NULL REFERENCES crane_model(id) ON DELETE CASCADE,
+  mass_t REAL NOT NULL CHECK (mass_t > 0),
+  rated_t REAL NOT NULL CHECK (rated_t > 0),
+  is_default INTEGER NOT NULL CHECK (is_default IN (0, 1)),
+  source_page INTEGER NOT NULL CHECK (source_page > 0),
+  PRIMARY KEY (model_id, mass_t)
+);
+CREATE UNIQUE INDEX idx_main_hook_default ON crane_main_hook(model_id) WHERE is_default = 1;
+
 CREATE TABLE crane_config (
   id            INTEGER PRIMARY KEY,
   model_id      INTEGER NOT NULL REFERENCES crane_model(id) ON DELETE CASCADE,

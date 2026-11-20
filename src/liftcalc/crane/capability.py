@@ -97,7 +97,7 @@ def find_capability(points: Sequence[Point], *, required: float, ratio_limit: fl
 
 
 def assess_single(points: Sequence[Point], *, required: float, limit: float, height: float | None,
-                  radius: float | None, config: str | None, hook_known: bool
+                  radius: float | None, config: str | None, hook_known: bool, hook_overload: bool = False
                   ) -> tuple[Verdict, list[dict], str, str]:
     """逐配置、逐臂长核对载荷和钩高。幅度夹在两档间时，按较大的表档核载。"""
     if required <= 0:
@@ -118,6 +118,8 @@ def assess_single(points: Sequence[Point], *, required: float, limit: float, hei
         for point in series:
             if not hook_known:
                 reason = '缺吊钩自重'
+            elif hook_overload:
+                reason = '吊件与索具的计算重量超过所选主钩额载'
             elif required > point.rated_load * limit + TOL:
                 reason = '载荷超限'
             elif height is not None and (point.lift_height is None or (radius is not None and radius != point.radius)):

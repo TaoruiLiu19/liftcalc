@@ -26,6 +26,7 @@ const form = reactive({
   radius: '10',
   payload: '10',
   hook: '',
+  hookChoice: '',
   rigging: '0.3',
   height: '',
   limit: '0.90',
@@ -37,6 +38,11 @@ const form = reactive({
 const choices = computed(() => [...new Set(models.value.map((m) => m.model))]),
   configs = computed(() => models.value.filter((m) => m.model === form.model))
 const cap = computed(() => snapshot.value?.cap)
+const activeModel = computed(() => configs.value[0])
+const hookOptions = computed(() => activeModel.value?.main_hooks ?? [])
+const legacyHook = computed(() => activeModel.value?.hook_main_t)
+const customHook = computed(() => !hookOptions.value.length || form.hookChoice === 'manual')
+const needsHookMass = computed(() => !!hookOptions.value.length || !legacyHook.value)
 let revision = 0
 function showCad() {
   usedCad.value = true
@@ -52,22 +58,31 @@ watch(
   { flush: 'sync' },
 )
 watch(
-  () => form.model,
+  activeModel,
   () => {
     form.config = ''
+    form.hook = ''
+    const preset = hookOptions.value.find((hook) => hook.is_default)
+    form.hookChoice = preset ? String(preset.mass_t) : ''
   },
+  { flush: 'sync' },
 )
 async function calculate() {
   const id = revision
   busy.value = true
   notice.value = ''
   try {
+    const mass = customHook.value ? form.hook : form.hookChoice
+    if ((mass === '' && needsHookMass.value) || (mass !== '' && !(Number(mass) > 0))) {
+      notice.value = customHook.value ? '请按实车铭牌填写吊钩自重（吨）。' : '请选择实车主钩。'
+      return
+    }
     const data = await window.pywebview!.api.calculate({
       kind: 'crane.capability',
       crane: { model: form.model, brand: configs.value[0]?.brand || '徐工' },
       config: form.config || null,
       payload: +form.payload,
-      hook_mass: +form.hook,
+      ...(mass === '' ? {} : { hook_mass: Number(mass) }),
       rigging: +form.rigging,
       limit: +form.limit,
       dynamic_factor: +form.factor,
@@ -146,6 +161,15 @@ async function save(fmt: string) {
               min=".001"
               v-model="form.radius"
           /></label>
+          <label v-if="hookOptions.length">实车主钩
+            <select v-model="form.hookChoice" required>
+              <option disabled value="">请选择实车安装的主钩</option>
+              <option v-for="hook in hookOptions" :key="hook.mass_t" :value="String(hook.mass_t)">
+                {{ hook.rated_t }} t 钩 · 自重 {{ hook.mass_t }} t
+              </option>
+              <option value="manual">手动填写其他吊钩</option>
+            </select>
+          </label>
           <div class="pair">
             <label
               >吊件 / t<input
@@ -154,12 +178,13 @@ async function save(fmt: string) {
                 step="any"
                 min=".001"
                 v-model="form.payload" /></label
-            ><label
-              >吊钩 / t<input
+            ><label v-if="customHook"
+              >吊钩自重 / t<input
                 type="number"
                 step="any"
-                min="0"
-                placeholder="机型库"
+                min="0.000001"
+                :required="needsHookMass"
+                :placeholder="legacyHook ? '默认 ' + legacyHook + ' t' : '按铭牌填写（吨）'"
                 v-model="form.hook"
             /></label>
             <label
@@ -235,6 +260,8 @@ async function save(fmt: string) {
           >
           <p>{{ cap?.explanation || '等待有效工况' }}</p>
           <dl>
+            <dt>采用吊钩自重</dt>
+            <dd>{{ cap?.hook_mass || '—' }} t</dd>
             <dt>计算荷载</dt>
             <dd>{{ cap?.required.toFixed(3) ?? '—' }} t</dd>
             <dt>额定载荷</dt>

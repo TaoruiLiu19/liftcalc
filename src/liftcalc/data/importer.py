@@ -224,6 +224,15 @@ def build_db(pack_dir: Path, out_path: Path, data_version: str) -> BuildStats:
             )
             stats.crane_capacities += 1
 
+        for hook in _read_csv(crane_dir / "main_hooks.csv",
+                              ["brand", "model", "mass_t", "rated_t", "is_default", "source_page"]):
+            conn.execute(
+                """INSERT INTO crane_main_hook (model_id, mass_t, rated_t, is_default, source_page)
+                   VALUES ((SELECT id FROM crane_model WHERE brand=? AND model=?), ?, ?, ?, ?)""",
+                (hook["brand"], hook["model"], float(hook["mass_t"]), float(hook["rated_t"]),
+                 int(hook["is_default"]), int(hook["source_page"])),
+            )
+
         conn.execute("INSERT INTO meta (key, value) VALUES ('data_version', ?)", (data_version,))
         conn.execute("INSERT INTO meta (key, value) VALUES ('built_from', ?)", (str(pack_dir),))
         conn.commit()
