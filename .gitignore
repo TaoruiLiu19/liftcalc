@@ -15,11 +15,11 @@ out/
 *.log
 *.tmp
 temp.txt
-# 启动器 / WebView2 / pip 构建在仓库根目录留下的残留
+# 启动器 / WebView2 / pip 在仓库根目录留下的临时目录（空壳，删了也会再生成）
 /liftcalc-*
 /webview2/
 /tmp*/
-/pip-build-*
+/pip-*/
 
 # 编辑器
 .vscode/
