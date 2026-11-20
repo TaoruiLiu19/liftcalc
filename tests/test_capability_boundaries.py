@@ -82,6 +82,17 @@ def test_full_counterweight_chart_cells_keep_units_and_extension_codes(repo: Rep
     ("STC550C5", 45, 36, []),
     ("STC750", 11.8, 6, [43.0]),
     ("STC750", 20.1, 6, [20.0, 33.1]),
+    ("STC1100T7", 13.9, 3, []),
+    ("STC1100T7", 73.2, 64, [1.1]),
+    ("STC1200T7", 12.9, 2.5, []),
+    ("STC1200T7", 21.5, 3, [72.0]),
+    ("STC1600T7", 75.5, 64, [1.7, 2.0]),
+    ("STC2000C8-8", 15.1, 3.5, [150.0]),
+    ("STC2000C8-8", 59.4, 16, []),
+    ("STC2400C8PHEV", 15.1, 3, [240.0]),
+    ("STC3000C8-8", 15.1, 2.5, []),
+    ("STC3000C8-8", 25.1, 5, [124.8]),
+    ("STC3000C8-8", 40, 6.5, []),
 ])
 def test_sany_full_counterweight_chart(repo, model, boom, radius, expected):
     cells = {row["config_name"]: row["rated_load"]
