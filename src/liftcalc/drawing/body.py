@@ -88,61 +88,64 @@ def draw_truck(figure: Figure, paper, axles: int | None, hinge: tuple[float, flo
               fine: bool = True) -> None:
         contour(((left, top), (right, top), (right, bottom), (left, bottom)), fine=fine)
 
-    # 底盘 + 车头轮廓
-    contour(((67, 194), (685, 194), (706, 161), (838, 161), (851, 154),
-             (969, 154), (979, 160), (995, 208), (1007, 217), (1007, 264),
-             (983, 274), (956, 287), (887, 287), (843, 260), (836, 242),
-             (765, 242), (750, 258), (743, 287), (691, 287), (691, 216),
-             (162, 216), (162, 284), (130, 284), (130, 297), (67, 297)))
-    detail((69, 201), (877, 201), (883, 208), (883, 265), (990, 265))
-    detail((128, 211), (877, 211))
-    # 驾驶室
-    contour(((924, 163), (969, 163), (976, 185), (976, 208), (935, 208), (929, 201)),
-            fine=True)
-    detail((919, 162), (919, 299), (941, 299), (953, 286))
-    detail((991, 215), (998, 217), (998, 252), (991, 254), (991, 215))
-    # 后视镜
-    detail((813, 157), (815, 146), (851, 146), (860, 154))
-    detail((858, 151), (875, 138), (875, 124), (880, 124), (893, 154))
-    # 支腿箱 / 工具箱
-    for left, right in ((133, 160), (694, 720)):
-        panel(left, 213, right, 283)
-        for level in (227, 246, 265, 280):
-            detail((left + 3, level), (right - 3, level))
-    panel(73, 194, 100, 287)
-    panel(101, 195, 125, 272)
-    for left in (400, 448):
-        panel(left, 217, left + 44, 284)
-        detail((left + 12, 226), (left + 23, 226))
+    # 正投影：底盘梁高于轮胎，轮罩按实际绘制的轴位留空。
+    stations = axle_stations(axles or DEFAULT_AXLES)
+    panel(68, 194, 910, 216, False)
+    detail((72, 202), (894, 202))
+    contour(((68, 216), (135, 216), (135, 246), (117, 258), (68, 258)))
+    # 公路驾驶室与前保险杠构成独立轮廓。
+    contour(((907, 216), (907, 165), (916, 151), (969, 151),
+             (982, 159), (1000, 205), (1007, 215), (1007, 261),
+             (992, 271), (923, 271), (909, 255)))
+    contour(((917, 163), (964, 159), (976, 167), (989, 199),
+             (918, 201)), fine=True)
+    detail((925, 205), (925, 249), (976, 249), (984, 237))
+    detail((988, 215), (1003, 215), (1003, 226), (987, 226))
+    detail((921, 258), (993, 258))
+    contour(((690, 194), (701, 165), (716, 157), (882, 157),
+             (897, 166), (897, 194)))
+    for level in (169, 176, 183):
+        detail((730, level), (791, level))
+    for left, right in zip(stations, stations[1:]):
+        if right - left > 135:
+            panel(left + 52, 218, right - 52, 258)
+            detail((left + 58, 230), (right - 58, 230))
 
-    # 车轮：每轴一轮（立面只见外轮），三道同心圆 + 轮拱
-    # 吨级不明（axles=None）时按描点来源的五轴画，别画成没轮子的车
-    for station in axle_stations(axles or DEFAULT_AXLES):
+    # 作业立面的近侧支腿；足板落在车轮共用的地面线上。
+    for x, underside in ((88, 258), (970, 271)):
+        panel(x - 10, underside, x + 10, 293, False)
+        panel(x - 5, 293, x + 5, 323)
+        panel(x - 21, 323, x + 21, GROUND_PX, False)
+
+    for station in stations:
         center = (point(station, 0.0)[0], paper(0.0, WHEEL_R)[1])
-        for fraction, layer in ((1.0, LAYER_OUTLINE), (0.57, LAYER_THIN),
-                                (0.24, LAYER_OUTLINE)):
+        for fraction, layer in ((1.0, LAYER_OUTLINE), (0.64, LAYER_THIN),
+                                (0.30, LAYER_OUTLINE)):
             figure.add(Circle(*center, WHEEL_R * fraction * paper.s, layer))
-        contour(((station - 48, 276), (station - 44, 257), (station - 25, 236),
-                 (station + 23, 236), (station + 43, 256), (station + 48, 275)),
+        contour(((station - 49, 269), (station - 42, 248), (station - 22, 233),
+                 (station + 22, 233), (station + 42, 248), (station + 49, 269)),
                 closed=False, fine=True)
 
-    # 回转平台落在底盘上；臂根销轴和座板共用性能表推导的铰点。
-    panel(175, 182, 682, 194, False)
+    # 回转支承、上车底架和配重分层；臂根耳板直接落在上车底架上。
+    panel(252, 186, 446, 194, False)
+    contour(((165, 182), (165, 157), (182, 150), (527, 150),
+             (548, 157), (675, 157), (675, 186), (208, 186)))
     hx, hy = hinge
-    pedestal = (point(186, 182), point(186, 132),
-                paper(hx + .43, hy - .24), paper(hx + .39, hy + .16),
-                paper(hx + .17, hy + .38), paper(hx - .17, hy + .38),
-                paper(hx - .43, hy + .10), paper(hx - .48, hy - .45),
-                point(505, 126), point(540, 135), point(540, 182))
+    pedestal = (paper(hx + .65, (GROUND_PX - 150) / PX_PER_M),
+                paper(hx + .60, hy - .62), paper(hx + .40, hy + .08),
+                paper(hx + .17, hy + .32), paper(hx - .18, hy + .32),
+                paper(hx - .46, hy + .03), paper(hx - .55, hy - .55),
+                paper(hx - 1.35, (GROUND_PX - 150) / PX_PER_M))
     figure.add(Polyline(pedestal, True, LAYER_OUTLINE))
-    panel(201, 142, 250, 170)
-    for level in (149, 156, 163):
-        detail((207, level), (244, level))
+    contour(((467, 150), (467, 113), (477, 105), (545, 105),
+             (553, 113), (553, 150)))
+    for level in (118, 131, 143):
+        detail((470, level), (550, level))
 
     # 上车操纵室位于主臂座靠车头的一侧，窗框、门线与室体一起前移。
-    contour(((560, 182), (558, 128), (574, 92), (581, 87),
-             (638, 84), (647, 89), (666, 138), (660, 182)))
+    contour(((560, 157), (558, 128), (574, 92), (581, 87),
+             (638, 84), (647, 89), (666, 138), (660, 157)))
     contour(((565, 133), (581, 96), (605, 94), (605, 132)), fine=True)
     contour(((614, 94), (636, 92), (652, 130), (614, 132)), fine=True)
     detail((562, 146), (658, 139))
-    detail((613, 139), (613, 174), (652, 174))
+    detail((613, 139), (613, 152), (652, 152))

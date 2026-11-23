@@ -163,6 +163,13 @@ pip install pint numpy pydantic python-docx ezdxf typer PyYAML pytest hypothesis
 
 ![列车上轨俯视概念图：起吊、横移转向、对轨落位](docs/handover/assets/dual-rail-transfer.svg)
 
+![横移帧的 A、B 径向立面及车体纵向受力](docs/handover/assets/dual-rail-sections.svg)
+
+读图时先在俯视图选姿态，再沿每台吊机各自的工作幅度方向看立面，最后沿车体纵向看两吊点分载。车体在平面内相对轨道的转角、主臂对水平面的仰角、吊索倾角属于不同的量。三帧只是离散姿态，全程最大幅度、最低净空和两机峰值载荷仍需沿实际轨迹求取。
+
+汽车吊轮廓参考[徐工 XCT130L8_1 规格书第 3 页](docs/handover/original/示例规格书_XCT130L8_1.pdf)和[多田野 GT-750EL 尺寸图](https://mediahub.tadano.com/m/320c39685c870761/original/doc_tadano_GT-750EL-3-01001_datasheet_metric_GEN_en.pdf)的正投影表达。软件按吨级绘制通用轮廓。双机过程图的设计参考了[双机协同轨迹规划研究](https://cindycia.github.io/publications/cai-2017-automatic/)对连续避碰、协调与载荷平衡的区分，以及[双机静力仿真研究](https://doi.org/10.1061/(ASCE)CO.1943-7862.0000526)对吊索方向与张力的处理。
+
+
 
 `capability` 和 `calc` 的退出码如下。带 `--out` 时，退出码 0、1、6 都会写入结果 JSON。退出码 6 的具体原因另写入标准错误。
 
