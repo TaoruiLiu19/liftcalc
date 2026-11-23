@@ -5,7 +5,7 @@ from pathlib import Path
 import ezdxf
 import pytest
 
-from liftcalc.crane.transfer import (Box, Transfer, analyze, clearance, interpolate_hook,
+from liftcalc.crane.transfer import (Box, Transfer, analyze, candidate_rank, clearance, interpolate_hook,
                                      plan_transfer, segment_gap, world)
 from liftcalc.data.repo import Repo
 from liftcalc.dusk import DesktopApi
@@ -156,3 +156,29 @@ def test_unequal_measured_rises_reach_each_hook_check_and_sheet(data):
                for s in result["segments"])
     sheet = result["drawings"][0]["svg"]
     assert "A 钩高 5.75 m" in sheet and "B 钩高 7.00 m" in sheet
+
+def test_clearance_threshold_uses_station_edges(data):
+    case = Transfer.model_validate(data["transfer"])
+    case.start = case.end = (0,0,90)
+    case.waypoints = []
+    for c,y in zip(case.cranes,(-12,12)):
+        c.center = (0,y)
+        c.footprint_length,c.footprint_width = 4,2
+    case.obstacles = [(2.75,-12,.5)]
+    case.plan_clearance = .3
+    repo = Repo(ROOT/"data/liftcalc.sqlite")
+    info = analyze(case,repo)
+    assert info["clearance"] == dict(lower_m=.25,pair="A 机占地 / 障碍 1",leg=1,start=0,end=1)
+    assert "A 机占地 / 障碍 1 平面净距不足" in info["segments"][0]["unsafe"]
+    case.auto_route = True
+    with pytest.raises(ValueError,match="净距"):
+        plan_transfer(case,repo)
+    case.plan_clearance = .25
+    path,info = plan_transfer(case,repo)
+    assert info["clearance"]["lower_m"] >= case.plan_clearance
+
+
+def test_planner_prefers_verified_then_pending_then_known_failure():
+    def rank(unsafe,unknown,ratio):
+        return candidate_rank([dict(unsafe=unsafe,unknown=unknown,ratios=[ratio])],1,5)
+    assert rank([],[],.75) < rank([],["缺表"],None) < rank(["超限"],[],.85)

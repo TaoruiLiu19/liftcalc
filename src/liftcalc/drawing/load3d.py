@@ -233,7 +233,7 @@ def load_figure(result: ComputationResult) -> Figure | None:
         forces = [float(item["force_t"])*9.80665 for item in slings]
         angles = [float(item["angle_deg"]) for item in slings]
         figure.add(Text(x=PAGE_W - 8.0, y=12.0,
-                        content=f"索力 {min(forces):.2f}–{max(forces):.2f} kN",
+                        content=f"名义索力 {min(forces):.2f}–{max(forces):.2f} kN",
                         height=3.2, align=ALIGN_RIGHT))
         figure.add(Text(x=PAGE_W - 8.0, y=7.6,
                         content=f"与竖直夹角 {min(angles):.1f}°–{max(angles):.1f}°",

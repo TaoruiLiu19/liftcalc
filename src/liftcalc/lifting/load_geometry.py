@@ -115,7 +115,9 @@ class Sling:
     length: float         # 吊索展开长度（吊钩中心到吊点）
     angle_deg: float      # 与竖直方向的夹角
     share: float          # 竖向分载比例（四根之和为 1）
-    force_t: float        # 索力（t）
+    force_t: float        # nominal tension in tonne-force
+    equilibrium_min_kn: float
+    equilibrium_max_kn: float
 
 
 @dataclass(frozen=True)
@@ -172,15 +174,20 @@ def sling_report(shape: LoadShape, weight_t: float) -> SlingReport:
             "重心超出四个吊点围成的范围，吊物会倾覆；请调整吊点位置或重心"
         )
 
-    quarter = weight_t / 4.0
     items: list[Sling] = []
     for lug in lugs(shape):
         sx = 1.0 if lug.x > 0 else -1.0
         sy = 1.0 if lug.y > 0 else -1.0
-        share = quarter * (1 + sx * fx) * (1 + sy * fy)
+        # Moments fix the total vertical reactions on each side. At their
+        # intersection the corner share can vary while all four remain nonnegative.
+        side_x = (1 + sx * fx) / 2
+        side_y = (1 + sy * fy) / 2
+        fraction = side_x * side_y
+        lower = max(0.0, side_x + side_y - 1)
+        upper = min(side_x, side_y)
         run = math.hypot(lug.x - shape.cg_x, lug.y - shape.cg_y)
         angle = math.degrees(math.atan2(run, height))
-        force = share / math.cos(math.radians(angle))
+        full_tension = weight_t * math.hypot(run, height) / height
         items.append(
             Sling(
                 index=lug.index,
@@ -190,8 +197,10 @@ def sling_report(shape: LoadShape, weight_t: float) -> SlingReport:
                 run=run,
                 length=math.hypot(run, height),
                 angle_deg=angle,
-                share=share / weight_t,
-                force_t=force,
+                share=fraction,
+                force_t=fraction * full_tension,
+                equilibrium_min_kn=lower * full_tension * 9.80665,
+                equilibrium_max_kn=upper * full_tension * 9.80665,
             )
         )
 

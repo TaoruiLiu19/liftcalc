@@ -839,6 +839,8 @@ def _load_summary(case: CapabilityCase) -> dict[str, Any]:
                 "angle_deg": item.angle_deg,
                 "share": item.share,
                 "force_t": item.force_t,
+                "equilibrium_min_kn": item.equilibrium_min_kn,
+                "equilibrium_max_kn": item.equilibrium_max_kn,
             }
             for item in slings.slings
         ],

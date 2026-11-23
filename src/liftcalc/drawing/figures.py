@@ -807,10 +807,10 @@ def _build_sheet_view(model: ElevationModel, model_notes: list[str],
         else:
             angle_text = f"四索与竖直夹角 {min(angles):.1f}°~{max(angles):.1f}°"
         if max(forces) - min(forces) < 0.005:
-            force_text = f"索力均为 {forces[0]:.2f} kN"
+            force_text = f"名义索力均为 {forces[0]:.2f} kN"
         else:
             force_text = (
-                f"索力 {min(forces):.2f}~{max(forces):.2f} kN（重心偏心使四索受力不均）"
+                f"名义索力 {min(forces):.2f}~{max(forces):.2f} kN（重心偏心使四索受力不均）"
             )
         notes.append(f"{angle_text}，{force_text}。")
     notes.append("圆+双弧为形心/重心符号；本图为能力反查示意，不作为施工依据。")

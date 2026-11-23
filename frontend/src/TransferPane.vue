@@ -11,7 +11,7 @@ import NumberEntry from './NumberEntry.vue'
 const props = defineProps<{models: Model[]}>()
 const form = reactive({
   length: 12, width: 3, height: 3, mass: 16, cg: [0,0,0], lugs: [[-5,0],[5,0]],
-  start: [-11,0,90], auto_route: true, auto_stations: true, end: [11,0,90], bottom: 1, factor: 1.1, gauge: 1.435,
+  start: [-11,0,90], auto_route: true, auto_stations: true, end: [11,0,90], bottom: 1, plan_clearance: 0, factor: 1.1, gauge: 1.435,
   cranes: [-1,1].map(sign => ({index: -1, boom: 0, center: [0,sign*5.5], footprint_length: 10, footprint_width: 5, heading: 0, boom_buffer: 1,
     hook: null as number|null, hook_rating: null as number|null, rigging: 0.3, sling: {datum:'top',value:null} as RiggingMeasurement,
     verified_height: null as number|null})),
@@ -98,7 +98,7 @@ const previewStations = computed(() => {
   const [[x1,y1],[x2,y2]] = form.lugs
   const sign = (x2-x1)*Math.sin(angle)+(y2-y1)*Math.cos(angle)>=0 ? 1 : -1
   return form.cranes.map((c,i) => {
-    const offset = (form.width/2+c.footprint_width/2+.35)*sign*(i===0?-1:1)
+    const offset = (form.width/2+c.footprint_width/2+form.plan_clearance+.35)*sign*(i===0?-1:1)
     return {...c,center:[(ax+bx)/2+offset*nx,(ay+by)/2+offset*ny],heading:heading*180/Math.PI}
   })
 })
@@ -218,6 +218,7 @@ const craneLabels=['臂投影包络半宽 / m','主钩自重 / t','主钩额载 
             <section class="block"><h3>转运条件</h3><div class="pair">
               <NumberEntry v-model="form.bottom" label="底面离地 / m" :min=".000001" :attempted="attempted"/>
               <NumberEntry v-model="form.factor" label="载荷放大系数" :min="1" :attempted="attempted"/>
+              <NumberEntry v-model="form.plan_clearance" label="要求的最小平面净距 / m" :min="0" :attempted="attempted"/>
               <NumberEntry v-model="form.gauge" label="目标轨距 / m" :min=".000001" :attempted="attempted"/>
             </div><p class="muted">按现场填写起止姿态；程序自动计算中间的平移与转角。</p></section>
           </div></div>
@@ -239,7 +240,9 @@ const craneLabels=['臂投影包络半宽 / m','主钩自重 / t','主钩额载 
       <SheetViewer ref="viewer" :svg="result.drawings[active].svg"/>
       <div class="columns result-layout">
       <details class="block"><summary>自动规划的站位与调姿 · {{result.poses.length-1}} 段</summary>
-        <TransferPlot v-bind="scene" site preview/>
+        <p>全程平面净距下界 ≥ {{(Math.floor(result.clearance.lower_m*1000)/1000).toFixed(3)}} m · {{result.clearance.pair}}</p>
+        <p>限制区间 P{{result.clearance.leg-1}} → P{{result.clearance.leg}}，路径进度 {{(result.clearance.start*100).toFixed(2)}}%–{{(result.clearance.end*100).toFixed(2)}}%</p>
+        <TransferPlot v-bind="scene" site preview :critical-progress="(result.clearance.start+result.clearance.end)/2"/>
         <p v-for="(c,i) in result.stations" :key="i">{{'AB'[i]}} 机中心 ({{c.center.map(x=>x.toFixed(2)).join(', ')}}) m · 长轴 {{c.heading.toFixed(1)}}°</p>
         <p v-for="(p,i) in result.poses" :key="i">P{{i}}　({{p.slice(0,2).map(x=>x.toFixed(2)).join(', ')}}) m · {{p[2].toFixed(1)}}°</p>
       </details>

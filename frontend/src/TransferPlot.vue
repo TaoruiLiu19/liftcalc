@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onDeactivated, ref, watch } from 'vue'
 const props=defineProps<{
   length:number; width:number; points:number[][]; pick:number
-  gauge:number; site?:boolean; preview?:boolean; provisional?:boolean; cranes:{center:number[]; footprint_length:number; footprint_width:number; heading:number}[]; poses:number[][]; obstacles:number[][]; focus?:number
+  gauge:number; site?:boolean; preview?:boolean; criticalProgress?:number; provisional?:boolean; cranes:{center:number[]; footprint_length:number; footprint_width:number; heading:number}[]; poses:number[][]; obstacles:number[][]; focus?:number
 }>()
 const emit=defineEmits<{place:[x:number,y:number]}>()
 const hover=ref<number[]>()
@@ -114,6 +114,7 @@ function locate(e:PointerEvent|MouseEvent){
   </template>
 </svg>
 <div v-if="preview" class="playback"><button type="button" @click="play">{{playing?'暂停':'慢速预演'}}</button>
+<button v-if="criticalProgress!==undefined" type="button" @click="stop();progress=criticalProgress">定位净距限制区间</button>
 <label>路径进度 <input aria-label="路径进度" type="range" min="0" max="1" step=".001" v-model.number="progress" @input="stop"></label>
 <span>{{(progress*100).toFixed(0)}}% · {{position[2].toFixed(1)}}°</span></div>
 <p v-if="preview">{{hooks.map((h,i)=>'AB'[i]+' 机　幅度 '+h.radius.toFixed(2)+' m　方位 '+h.azimuth.toFixed(1)+'°').join('　｜　')}}</p>

@@ -360,3 +360,8 @@ button.link { padding: 0 2px; border: 0; background: none; color: #b8b3ed; text-
 
 .single-error, [data-theme="dark"] .hint.single-error { color:#ffb5ba; border-color:#e58a90; }
 [data-theme="light"] .single-error { color:#a22730; border-color:#b7333c; }
+
+.sling-range { margin: 10px 0; }
+.sling-range table { width: 100%; font-size: 12px; font-variant-numeric: tabular-nums; margin-top: 6px; }
+.sling-range th, .sling-range td { padding: 3px 2px; text-align: right; }
+.sling-range th:first-child { text-align: left; }

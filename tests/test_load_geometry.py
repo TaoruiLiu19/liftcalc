@@ -301,3 +301,24 @@ def test_dual_report_shows_split(repo: Repo, tmp_path: Path) -> None:
     assert "3.1.1 双机抬吊的负荷分配" in headings
     joined = "\n".join(paragraph.text for paragraph in document.paragraphs)
     assert "按重心位置分配" in joined
+
+
+@pytest.mark.parametrize("ex,ey", [(0,0),(.8,-.45),(-1.7,.79)])
+def test_four_sling_bounds_are_attainable_in_equilibrium(ex,ey):
+    shape = G.LoadShape(length=4, width=2, height=1, sling_height=3, cg_x=ex, cg_y=ey)
+    report = G.sling_report(shape, 10)
+    # From the two side moments, all solutions depend on the far-front share u.
+    right,front = (1+ex/2)/2,(1+ey)/2
+    ends = (max(0,right+front-1),min(right,front))
+    tensions = []
+    for u in ends:
+        shares = (u,front-u,right-u,1-right-front+u)
+        assert min(shares) >= -1e-12
+        assert sum(s.x*q for s,q in zip(report.slings,shares)) == pytest.approx(ex)
+        assert sum(s.y*q for s,q in zip(report.slings,shares)) == pytest.approx(ey)
+        tensions.append([98.0665*q/math.cos(math.radians(s.angle_deg))
+                         for s,q in zip(report.slings,shares)])
+    for sling,limits in zip(report.slings,zip(*tensions)):
+        assert sling.equilibrium_min_kn == pytest.approx(min(limits))
+        assert sling.equilibrium_max_kn == pytest.approx(max(limits))
+        assert min(limits) <= sling.force_t*9.80665 <= max(limits)

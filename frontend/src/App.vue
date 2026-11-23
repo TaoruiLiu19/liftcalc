@@ -354,7 +354,7 @@ async function save(fmt: string) {
             <dd>{{ load?.sling_height_m?.toFixed(2) ?? '—' }} m</dd>
             <dt>所需起升高度</dt>
             <dd>{{ load?.required_lift_height_m?.toFixed(2) ?? '—' }} m</dd>
-            <dt>最大索力</dt>
+            <dt>名义最大索力</dt>
             <dd>{{ load?.max_force_t != null ? (load.max_force_t * 9.80665).toFixed(2) : '—' }} kN</dd>
             <dt>负荷率</dt>
             <dd>
@@ -365,6 +365,13 @@ async function save(fmt: string) {
               }}
             </dd>
           </dl>
+          <details v-if="load?.slings.length" class="sling-range"><summary>四索静力分载范围</summary>
+            <table><thead><tr><th>吊索</th><th>名义 / kN</th><th>范围 / kN</th></tr></thead>
+              <tbody><tr v-for="s in load.slings" :key="s.index"><th>{{s.name}}</th>
+                <td>{{(s.force_t*9.80665).toFixed(2)}}</td>
+                <td>{{s.equilibrium_min_kn.toFixed(2)}}–{{s.equilibrium_max_kn.toFixed(2)}}</td></tr></tbody></table>
+            <p class="muted">按当前水平姿态、单钩和四个固定吊点求各根索的静力范围。各上限分别取值，实际分载还取决于索长误差和刚度。</p>
+          </details>
           <p class="muted" v-for="w in snapshot?.warnings">{{ w }}</p>
         </aside>
       </div>
