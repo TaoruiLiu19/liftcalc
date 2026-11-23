@@ -56,7 +56,7 @@ export type TransferResult = {
   drawings: { id: string; svg: string }[]
   shares: number[]
   loads: number[]
-  segments: { start: number; end: number; radii: [number, number][]; ratios: (number | null)[]; unsafe: string[]; unknown: string[] }[]
+  segments: { leg: number; start: number; end: number; radii: [number, number][]; ratios: (number | null)[]; unsafe: string[]; unknown: string[] }[]
 }
 export interface Api {
   calculate(input: { kind: 'rail.transfer'; transfer: unknown }): Promise<TransferResult>

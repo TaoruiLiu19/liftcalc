@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, onDeactivated, ref, watch } from 'vue'
 const props=defineProps<{
   length:number; width:number; points:number[][]; pick:number
-  gauge:number; site?:boolean; cranes:{center:number[]; exclusion:number}[]; poses:number[][]; obstacles:number[][]; focus?:number
+  gauge:number; site?:boolean; preview?:boolean; cranes:{center:number[]; exclusion:number}[]; poses:number[][]; obstacles:number[][]; focus?:number
 }>()
 const emit=defineEmits<{place:[x:number,y:number]}>()
 const hover=ref<number[]>()
@@ -15,9 +15,31 @@ function outline(p:number[]){
   })
 }
 const bodies=computed(()=>props.site?props.poses.map(outline):[outline([0,0,0])])
+const progress=ref(0), playing=ref(false)
+let timer:ReturnType<typeof setInterval> | undefined
+function stop(){
+  clearInterval(timer)
+  playing.value=false
+}
+function play(){
+  if(playing.value){stop();return}
+  if(progress.value>=1)progress.value=0
+  playing.value=true
+  timer=setInterval(()=>{
+    progress.value=Math.min(1,progress.value+.05/(3*(props.poses.length-1)))
+    if(progress.value>=1)stop()
+  },50)
+}
+watch(()=>props.poses,()=>{stop();progress.value=0},{deep:true})
+onBeforeUnmount(stop)
+onDeactivated(stop)
+const position=computed(()=>{
+  const n=props.poses.length-1,t=progress.value*n,i=Math.min(n-1,Math.floor(t))
+  return props.poses[i].map((v,k)=>v+(t-i)*(props.poses[i+1][k]-v))
+})
 const rails=computed(()=>{
   if(!props.site) return []
-  const [cx,cy,deg]=props.poses[1], a=deg*Math.PI/180
+  const [cx,cy,deg]=props.poses[props.poses.length-1], a=deg*Math.PI/180
   return [-1,1].map(side=>[-1,1].map(end=>{
     const u=end*props.length*.72,v=side*props.gauge/2
     return [cx+u*Math.cos(a)-v*Math.sin(a),cy+u*Math.sin(a)+v*Math.cos(a)]
@@ -59,7 +81,8 @@ function locate(e:PointerEvent|MouseEvent){
   <g class="grid"><path v-for="t in xt" :key="'x'+t.n" :d="'M'+t.px+' 18v280'"/><path v-for="t in yt" :key="'y'+t.n" :d="'M20 '+t.px+'h560'"/></g>
   <g v-if="site" class="rails"><polyline v-for="(rail,i) in rails" :key="i" :points="poly(rail)"/>
     <polyline class="travel" :points="poly(poses)"/></g>
-  <polygon v-for="(b,i) in bodies" :key="i" :points="poly(b)" :class="['body',{end:i===1}]"/>
+  <polygon v-for="(b,i) in bodies" :key="i" :points="poly(b)" :class="['body',{end:i>0}]"/>
+  <polygon v-if="preview" class="moving" :points="poly(outline(position))"/>
   <g class="axis"><path :d="'M18 '+Y(0)+'H582l-6 -3m6 3-6 3'"/><path :d="'M'+X(0)+' 299V15l-3 6m3 -6 3 6'"/></g>
   <g class="ticks"><text v-for="t in xt.filter(t=>t.n!==0)" :key="t.n" :x="t.px" y="308" text-anchor="middle">{{t.n}}</text><text v-for="t in yt.filter(t=>t.n!==0)" :key="t.n" x="4" :y="t.px+4">{{t.n}}</text>
   <text :x="X(0)+7" :y="Y(0)+15">O</text><text x="568" :y="Y(0)-8">+X</text><text :x="X(0)+7" y="20">+Y</text></g>
@@ -71,10 +94,13 @@ function locate(e:PointerEvent|MouseEvent){
   </template>
   <template v-else><g v-for="(d,i) in disks" :key="i" :class="['disk',{focus:i===focus}]">
     <circle :cx="X(d.p[0])" :cy="Y(d.p[1])" :r="Math.max(0,d.r*frame.k)"/><text :x="X(d.p[0])+4" :y="Y(d.p[1])-4">{{d.label}}</text></g>
-    <text v-for="(p,i) in poses" :key="i" :x="X(p[0])+5" :y="Y(p[1])+16">{{i?'落位':'起吊'}}</text>
+    <text v-for="(p,i) in poses" :key="i" :x="X(p[0])+5" :y="Y(p[1])+16">P{{i}}</text>
   </template>
 </svg>
-<p>{{site?'实线为起吊位置，虚线为落位位置，圆为平面禁入区。':hover?'X '+hover[0].toFixed(3)+' m　 Y '+hover[1].toFixed(3)+' m':'原点 O 在吊物形心，+X 沿车长，+Y 沿车宽。'}}</p></figure>
+<div v-if="preview" class="playback"><button type="button" @click="play">{{playing?'暂停':'慢速预演'}}</button>
+<label>路径进度 <input aria-label="路径进度" type="range" min="0" max="1" step=".001" v-model.number="progress" @input="stop"></label>
+<span>{{(progress*100).toFixed(0)}}% · {{position[2].toFixed(1)}}°</span></div>
+<p>{{site?'P0 为起吊位置，依次调姿至末点落位；圆为禁入区。':hover?'X '+hover[0].toFixed(3)+' m　 Y '+hover[1].toFixed(3)+' m':'原点 O 在吊物形心，+X 沿车长，+Y 沿车宽。'}}</p></figure>
 </template>
 <style scoped>
 figure{margin:0;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--plot)}
@@ -83,7 +109,7 @@ figcaption span,p{font-size:12px;color:var(--quiet)}p{padding:6px 14px;margin:0;
 svg{display:block;width:100%;height:auto}.pick{cursor:crosshair}
 .grid path{stroke:var(--line);stroke-width:.7}.axis path{stroke:var(--quiet);stroke-width:1.1;fill:none}
 text{font:13px 'Microsoft YaHei UI',sans-serif;fill:var(--ink)}.ticks text{font-size:11px;fill:var(--quiet)}
-.rails polyline{stroke:var(--quiet);stroke-width:1.4;fill:none}.rails .travel{stroke-dasharray:3 4}.body{fill:var(--wash);stroke:var(--accent);stroke-width:1.5}.end{stroke-dasharray:5 4;fill:none}
+.playback{display:flex;align-items:center;gap:8px;padding:8px 12px;flex-wrap:wrap}.playback label{display:flex;align-items:center;gap:6px;flex:1}.playback input{flex:1;min-width:60px}.playback span{font-size:12px}.moving{fill:var(--wash);stroke:var(--accent);stroke-width:3}.rails polyline{stroke:var(--quiet);stroke-width:1.4;fill:none}.rails .travel{stroke-dasharray:3 4}.body{fill:var(--wash);stroke:var(--accent);stroke-width:1.5}.end{stroke-dasharray:5 4;fill:none}
 .ab{stroke:var(--accent);stroke-dasharray:5 3;fill:none}.marker{color:var(--accent)}.cg{color:var(--warm)}
 .marker text{fill:currentColor;font-weight:700}.disk circle{stroke:var(--quiet);fill:none}.focus circle{stroke:var(--accent);stroke-width:2;fill:var(--wash)}
 </style>

@@ -9,8 +9,8 @@ import NumberEntry from './NumberEntry.vue'
 const props = defineProps<{models: Model[]}>()
 const form = reactive({
   length: 12, width: 3, height: 3, mass: 16, cg: [0,0,0], lugs: [[-5,0],[5,0]],
-  start: [-8,0,78], end: [8,0,90], bottom: 1, factor: 1.1, gauge: 1.435,
-  cranes: [-1,1].map(sign => ({index: -1, boom: 0, center: [0,sign*14], exclusion: 3, boom_buffer: 1,
+  start: [-11,0,90], waypoints: [[-10,-.3,6],[0,0,3],[10,0,0]], end: [11,0,90], bottom: 1, factor: 1.1, gauge: 1.435,
+  cranes: [-1,1].map(sign => ({index: -1, boom: 0, center: [0,sign*5.5], exclusion: 3, boom_buffer: 1,
     hook: null as number|null, hook_rating: null as number|null, rigging: 0.3, sling_height: 2,
     verified_height: null as number|null})),
   obstacles: [] as number[][],
@@ -88,14 +88,20 @@ function place(x:number,y:number){
   p[0]=x; p[1]=y
 }
 const scene=computed(()=>({length:form.length,width:form.width,points:points.value,pick:pick.value,
-  gauge:form.gauge,cranes:form.cranes,poses:[form.start,form.end],obstacles:form.obstacles}))
+  gauge:form.gauge,cranes:form.cranes,poses:[form.start,...form.waypoints,form.end],obstacles:form.obstacles}))
+function insertPose(after:number) {
+  const poses=scene.value.poses
+  form.waypoints.splice(after,0,poses[after].map((n,k)=>(n+poses[after+1][k])/2))
+}
+const gap=computed(()=>Math.hypot(form.cranes[1].center[0]-form.cranes[0].center[0],
+  form.cranes[1].center[1]-form.cranes[0].center[1])-form.cranes[0].exclusion-form.cranes[1].exclusion)
 const runs=computed(()=>{
-  const out:{start:number;end:number;text:string;level:string}[]=[]
+  const out:{start:number;end:number;text:string;level:string;leg:number}[]=[]
   for(const s of result.value?.segments ?? []){
     const text=[...s.unsafe,...s.unknown].join('、') || '已核项满足'
     const last=out[out.length-1]
-    if(last?.text===text) last.end=s.end
-    else out.push({start:s.start,end:s.end,text,level:s.unsafe.length?'fail':s.unknown.length?'pending':'pass'})
+    if(last?.text===text && last.leg===s.leg) last.end=s.end
+    else out.push({start:s.start,end:s.end,leg:s.leg,text,level:s.unsafe.length?'fail':s.unknown.length?'pending':'pass'})
   }
   return out
 })
@@ -167,20 +173,25 @@ const craneLabels=['平面禁入半径 / m','臂投影包络半宽 / m','主钩�
       </template>
       <template v-if="step===3">
         <div class="columns"><div class="stack">
-          <TransferPlot v-bind="scene" site/>
+          <TransferPlot v-bind="scene" site preview/>
+          <p class="muted">两机禁入圆边界间距 {{gap.toFixed(2)}} m　·　车长 {{form.length}} m　·　车宽 {{form.width}} m</p>
           <section class="block"><h3>场地禁入圆</h3>
             <div v-for="(o,i) in form.obstacles" :key="i" class="obstacle"><div class="three"><NumberEntry v-for="(_,k) in o" :key="k" v-model="o[k]" :label="['X / m','Y / m','半径 / m'][k]" :min="k===2?.000001:undefined" :attempted="attempted"/></div><button type="button" @click="form.obstacles.splice(i,1)">移除障碍 {{i+1}}</button></div>
             <button type="button" @click="form.obstacles.push([0,0,1])">＋ 添加障碍</button>
           </section></div>
           <div class="stack">
-            <section v-for="(p,i) in [form.start,form.end]" :key="i" class="block"><h3>{{i?'对轨落位':'起吊位置'}}</h3><div class="three">
+            <section v-for="(p,i) in scene.poses" :key="i" class="block"><h3>P{{i}} · {{i===0?'起吊位置':i===scene.poses.length-1?'对轨落位':'调姿位置'}}</h3><div class="three">
               <NumberEntry v-for="(_,k) in p" :key="k" v-model="p[k]" :label="['中心 X / m','中心 Y / m','航向 / °'][k]" :attempted="attempted"/>
+            </div>
+            <div class="pose-tools">
+              <button v-if="i<scene.poses.length-1" type="button" :disabled="form.waypoints.length>=30" @click="insertPose(i)">在此后插入调姿点</button>
+              <button v-if="i>0 && i<=form.waypoints.length" type="button" @click="form.waypoints.splice(i-1,1)">移除此点</button>
             </div></section>
             <section class="block"><h3>转运条件</h3><div class="pair">
               <NumberEntry v-model="form.bottom" label="底面离地 / m" :min=".000001" :attempted="attempted"/>
               <NumberEntry v-model="form.factor" label="载荷放大系数" :min="1" :attempted="attempted"/>
               <NumberEntry v-model="form.gauge" label="目标轨距 / m" :min=".000001" :attempted="attempted"/>
-            </div><p class="muted">航向自 +X 逆时针为正，中心直线移动。</p></section>
+            </div><p class="muted">每段分别插值中心位置和航向；相邻点中心相同可表达原地调向。</p></section>
           </div></div>
       </template>
       <p v-if="error" class="alert" role="alert">{{error}}</p>
@@ -196,7 +207,7 @@ const craneLabels=['平面禁入半径 / m','臂投影包络半宽 / m','主钩�
         <div class="stack"><section v-for="(_,i) in form.cranes" :key="i" class="block"><h3>{{'AB'[i]}} 机校核</h3>
           <p>幅度包络　{{Math.min(...result.segments.map(s=>s.radii[i][0])).toFixed(2)}}–{{Math.max(...result.segments.map(s=>s.radii[i][1])).toFixed(2)}} m</p>
           <p>已覆盖档最高负荷率　{{result.segments.some(s=>s.ratios[i]!==null)?(100*Math.max(...result.segments.map(s=>s.ratios[i]??0))).toFixed(1)+'%':'无数据'}}</p></section>
-          <details class="block"><summary>分段校核明细（{{runs.length}}）</summary><p v-for="r in runs" :key="r.start" :data-status="r.level">{{(100*r.start).toFixed(2)}}% – {{(100*r.end).toFixed(2)}}%　{{r.text}}</p></details></div></div>
+          <details class="block"><summary>分段校核明细（{{runs.length}}）</summary><p v-for="r in runs" :key="r.start" :data-status="r.level">P{{r.leg-1}} → P{{r.leg}}　{{(100*r.start).toFixed(2)}}% – {{(100*r.end).toFixed(2)}}%　{{r.text}}</p></details></div></div>
       <p v-if="error" class="alert" role="alert">{{error}}</p>
       <p class="muted">校核范围为表档载荷、钩载、所填钩高及平面禁入区。臂间三维净空、索间干涉、回转扇区、不同步倾斜、地基与起落段需另行复核。</p>
       <button @click="advance(3)">返回转向与场地</button>
@@ -222,7 +233,7 @@ h3{font-size:15px;margin:0 0 10px}.block{padding:15px;border-radius:12px;border:
 .point-editor.invalid{border-color:var(--danger)}
 .decision{justify-content:space-between;background:var(--wash);flex-wrap:wrap}.decision[data-status=pending],[data-status=pending]{color:var(--warm)}
 .export{margin-left:auto}.result-layout{grid-template-columns:minmax(0,1.7fr) minmax(230px,1fr)}.paper{height:clamp(250px,49vh,580px);margin-top:12px}
-.obstacle{padding-bottom:12px}.transfer-output nav{flex-wrap:wrap}.muted{color:var(--quiet)}
+.pose-tools{display:flex;gap:8px;margin-top:8px}.obstacle{padding-bottom:12px}.transfer-output nav{flex-wrap:wrap}.muted{color:var(--quiet)}
 @media(max-width:920px){.columns{grid-template-columns:1fr}.four{grid-template-columns:1fr 1fr}}
 @media(max-width:680px){.workflow{display:flex;flex-direction:column;gap:8px}.workflow-nav{width:100%}.workflow-nav h2{display:none}.steps{flex-direction:row;flex-wrap:wrap}.steps li{flex:auto}}
 </style>

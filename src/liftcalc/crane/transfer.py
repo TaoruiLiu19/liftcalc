@@ -43,6 +43,7 @@ class Transfer(Inputs):
     cranes: tuple[Crane, Crane]
     start: tuple[float, float, float]
     end: tuple[float, float, float]
+    waypoints: list[tuple[float, float, float]] = Field(default_factory=list, max_length=30)
     gauge: Positive = 1.435
     bottom: Positive
     factor: Annotated[float, Field(ge=1)]
@@ -65,8 +66,16 @@ class Transfer(Inputs):
             raise ValueError("重心投影须在两吊点之间，两侧均须受拉。")
         return 1-share, share
 
+    @property
+    def route(self):
+        return [self.start, *self.waypoints, self.end]
+
     def pose(self, t):
-        x, y, deg = (a + t*(b-a) for a, b in zip(self.start, self.end))
+        route = self.route
+        offset = t * (len(route)-1)
+        leg = min(int(offset), len(route)-2)
+        u = offset - leg
+        x, y, deg = (a + u*(b-a) for a, b in zip(route[leg], route[leg+1]))
         angle = math.radians(deg)
         return x, y, math.cos(angle), math.sin(angle)
 
@@ -103,14 +112,25 @@ def segment_gap(a, b, c, d):
                point_segment(c,a,b), point_segment(d,a,b))
 
 
+def route_intervals(case):
+    route = case.route
+    leg_count = len(route)-1
+    total = 0
+    for leg, (a, b) in enumerate(zip(route, route[1:])):
+        travel = math.dist(a[:2], b[:2])
+        turn = abs(math.radians(b[2]-a[2]))
+        sweep = travel + turn*math.hypot(case.length, case.width)/2
+        count = max(1, math.ceil(sweep/.2), math.ceil(turn/math.radians(1)))
+        total += count
+        if total > 5000:
+            raise ValueError("轨迹过长，请拆分工况。")
+        for i in range(count):
+            yield (leg, (leg+i/count)/leg_count, (leg+(i+1)/count)/leg_count,
+                   travel/count, turn/count, sweep/count)
+
+
 def analyze(case, repo):
     shares = case.shares()
-    travel = math.dist(case.start[:2], case.end[:2])
-    turn = abs(math.radians(case.end[2]-case.start[2]))
-    speed = travel + turn*math.hypot(case.length, case.width)/2
-    count = max(1, math.ceil(speed/.2), math.ceil(turn/math.radians(1)))
-    if count > 5000:
-        raise ValueError("轨迹过长，请分段校核。")
     disks = [(*c.center, c.exclusion) for c in case.cranes] + case.obstacles
     charts = []
     loads = []
@@ -121,8 +141,8 @@ def analyze(case, repo):
         loads.append((case.mass*share + crane.rigging)*case.factor + crane.hook)
 
     segments = []
-    for i in range(count):
-        mid = (i+.5)/count
+    for leg, start, end, travel, turn, sweep in route_intervals(case):
+        mid = (start+end)/2
         pose = case.pose(mid)
         unsafe, unknown = [], []
         ratios = []
@@ -131,12 +151,12 @@ def analyze(case, repo):
         for j, (crane, lug, rows, gross) in enumerate(zip(case.cranes, case.lugs, charts, loads)):
             tag = "AB"[j]
             radius = math.dist(world(pose, lug), crane.center)
-            delta = (travel + turn*math.hypot(*lug))/(2*count)
+            delta = (travel + turn*math.hypot(*lug))/2
             radii = [r["radius"] for r in rows]
             if gross-crane.hook > crane.hook_rating:
                 unsafe.append(tag+"钩载超限")
             witness = [math.dist(world(case.pose(t), lug), crane.center)
-                       for t in (i/count, mid, (i+1)/count)]
+                       for t in (start, mid, end)]
             if not rows or min(witness) < radii[0] or max(witness) > radii[-1]:
                 unknown.append(tag+"幅度无表档")
             lower, upper = radius-delta, radius+delta
@@ -168,14 +188,14 @@ def analyze(case, repo):
         for j, disk in enumerate(disks):
             label = ("AB"[j]+"机" if j < 2 else f"障碍{j-1}")
             gap = clearance(case, pose, disk)
-            if min(gap, clearance(case, case.pose(i/count), disk),
-                   clearance(case, case.pose((i+1)/count), disk)) <= 0:
+            if min(gap, clearance(case, case.pose(start), disk),
+                   clearance(case, case.pose(end), disk)) <= 0:
                 unsafe.append(label+"禁入区相交")
-            elif gap <= speed/(2*count):
+            elif gap <= sweep/2:
                 unknown.append(label+"区间净距待核")
         # Moving endpoint bounds the displacement of the entire projected boom segment.
         for j, crane in enumerate(case.cranes):
-            movement = (travel + turn*math.hypot(*case.lugs[j]))/(2*count)
+            movement = (travel + turn*math.hypot(*case.lugs[j]))/2
             for k, disk in enumerate(disks):
                 if k == j:
                     continue
@@ -185,8 +205,8 @@ def analyze(case, repo):
                     (unsafe if gap <= 0 else unknown).append(tag+("相交" if gap <= 0 else "待核"))
         c1,c2 = case.cranes
         gap = segment_gap(c1.center,hooks[0],c2.center,hooks[1])-c1.boom_buffer-c2.boom_buffer
-        if gap <= (2*travel+turn*sum(math.hypot(*p) for p in case.lugs))/(2*count):
+        if gap <= (2*travel+turn*sum(math.hypot(*p) for p in case.lugs))/2:
             unknown.append("两臂投影可能交叠，须核三维净空")
-        segments.append(dict(start=i/count, end=(i+1)/count, ratios=ratios, radii=radius_bounds,
+        segments.append(dict(leg=leg+1, start=start, end=end, ratios=ratios, radii=radius_bounds,
                              unsafe=unsafe, unknown=list(dict.fromkeys(unknown))))
     return dict(shares=shares, loads=loads, segments=segments)
