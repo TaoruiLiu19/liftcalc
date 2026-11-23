@@ -240,7 +240,8 @@ def test_elevation_draws_cg_and_sling_table(repo: Repo) -> None:
     for expected in ("吊物与吊索", "重心G", "所需起升高度", "吊物 L×B×H", "索1 远前"):
         assert expected in texts, expected
     # 吊物按真实尺寸：h2 是真实高度、g 是真实长度
-    assert "h2=2.50" in texts and "g=6.00" in texts
+    assert "h2=2.50 m" in texts and "g=6.00 m" in texts
+    assert f"{result.aux['load']['slings'][0]['force_t']*9.80665:.2f} kN" in texts
     assert figure.meta["load_bottom"] == pytest.approx(1.0)
     model = figure.meta["model"]
     assert model.cg[0] == pytest.approx(model.radius)
@@ -257,7 +258,7 @@ def test_load_figure_has_axes_and_cg(repo: Repo) -> None:
     assert hook.cy > cg.cy
     texts = " ".join(item.content for item in load_figure.primitives
                      if isinstance(item, Text))
-    for expected in ("x（长度，远离吊车）", "y（宽度 B=3.00）", "z（竖向）", "重心 G",
+    for expected in ("x（长度，远离吊车）", "y（宽度 B=3.00 m）", "z（竖向）", "重心 G",
                      "L=6.00 m", "H=2.50 m", "吊钩"):
         assert expected in texts, expected
     for item in load_figure.primitives:

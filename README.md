@@ -32,7 +32,7 @@
 - 启动失败会把完整 traceback 写到 `%TEMP%\liftcalc-error.log`；脚本装依赖失败时会停住并提示。
 - **中文项目路径的坑**：.NET Framework 会把 `D:\学习日志\...` 这种非 ASCII 路径上的程序集当成"网络位置"而拒绝加载（`NotSupportedException 0x80131515`）。程序启动时会自动给 `python.exe` / `pythonw.exe` 旁边补一个含 `loadFromRemoteSources` 的 `*.exe.config`（已有的配置不会覆盖）；写不进去时会把 `pythonnet`/`webview` 复制到 ASCII 目录再从那里导入。
 
-1. **吊物与重心**。输入长、宽、高、重量和重心偏移。右侧固定轴测视图展示四个吊耳、吊钩和重心 G。修改 ex、ey 后，吊钩移到 G 正上方；修改 ez 只改变重心的高度。在“吊索与净空”可设置吊索竖直高度、吊点内缩和吊物底净空。
+1. **吊物与重心**。输入长、宽、高、重量和重心偏移。右侧固定轴测视图展示四个吊耳、吊钩和重心 G。修改 ex、ey 后，吊钩移到 G 正上方；修改 ez 只改变重心的高度。在「索具捆扎后高度」填写实测值或选择估算，在「吊点与离地净空」设置吊点内缩和吊物底净空。
 2. **车型与工况**。选择车型、性能表配置及实车主钩，输入索具重量后计算。左栏显示采用幅度、所需起升高度、最大索力和负荷率。返回第一步可查看货物图，编辑后重新计算。
 
 计算结果可导出 DXF、SVG、PNG 或 Word 报告。“CAD 核图”支持本次 DXF 和 32 MB 以内的本地 DXF，可左键平移、滚轮缩放。
@@ -159,6 +159,12 @@ pip install pint numpy pydantic python-docx ezdxf typer PyYAML pytest hypothesis
 > 给了 `--load-*` 或 `--cg-*` 才会启用"吊物真实几何"：推算所需起升高度、四索夹角与受力、双机按重心分载。
 > 不给时保持旧行为（2D 示意尺寸，双机按 60/40）。
 
+### 桌面索具捆扎后高度
+
+单机在「吊物与重心」输入，双机在「吊物与吊点」分别输入 A、B 侧。填写索具拉紧后的竖向实测值。选择顶面基准时填写索具净高；选择底面基准时填写包含吊物的总高度。所需钩中心离地高度等于吊物底面净空加捆扎后总高度。例如吊物高 3.00 m、顶面至钩中心 2.00 m、底面净空 1.00 m，输入净高 2.00 m 或总高 5.00 m，均得到所需钩高 6.00 m。单机也可显式选择按吊点几何估算。四索受力计算仍假设四个有效吊点在顶面，包绕摩擦、下部绑扎接触和各索弹性须按实际索系另核。
+
+吊装图的长度尺寸以 m 标注，质量和起重量用 t，索力和竖向合力用 kN，角度用 °。吊耳和截面详图用 mm。
+
 ### 桌面双机上轨
 
 [首页预览](docs/handover/assets/mode-home.png) · [吊点与重心编辑页](docs/handover/assets/transfer-points.png)
@@ -176,6 +182,13 @@ pip install pint numpy pydantic python-docx ezdxf typer PyYAML pytest hypothesis
 [静力示例 DXF](docs/handover/assets/01-static.dxf) · [轨迹示例 DXF](docs/handover/assets/02-trajectory.dxf)
 
 Synergy Lifting 的铁路设备案例按实测场地布置机位，并为避免配重干涉指定回转方向和时序；实际装车由拖车倒入悬吊设备下方完成。Cai 等的研究联合考虑双机运动、吊物平衡和连续碰撞。工作台借鉴这些约束，当前计算限于水平刚体、竖向受力和二维场地，尚未模拟配重回转扫掠、吊物摆动及完整三维机械运动。[铁路设备双机抬吊案例](https://synergy-lifting.co.uk/project/loading-60000kg-rail-machines-onto-transport-for-export/) · [双机路径规划研究](https://archive.ymsc.tsinghua.edu.cn/pacm_download/53/9490-dual-crane.pdf)
+
+进一步阅读：
+
+- Duerr 研究了四点吊装中索长误差、吊索刚度和吊物刚度对分载的影响。实测捆扎高度可以确定钩高，实际四索张力还受各根索长偏差影响。[Engineering Journal，1989](https://ej.aisc.org/index.php/engj/article/view/524)
+- 张育诚将起重能力和场地障碍纳入可行位姿，再用概率路线图搜索单机及双机的吊装路径。[台湾大学硕士论文，2010](https://tdr.lib.ntu.edu.tw/bitstream/123456789/10692/1/ntu-99-1.pdf)
+- 双机吊运细长梁的缩比试验研究了两根悬挂绳长度不同时的摆动响应，可作为后续动态模型的参考。文中的悬挂绳长度与本软件输入的钩下索具净高是两种测量量。[Mechanical Systems and Signal Processing，2019](https://www.sciencedirect.com/science/article/abs/pii/S0888327019301165)
+- 钱森等建立多机协作动力学模型，并比较改进蚁群算法在栅格场地中的路径长度和搜索效率，可用于设计路径规划对照试验。[机械工程学报，2022](https://qikan.cmes.org/jxgcxb/CN/10.3901/JME.2022.07.020)
 
 [演示输入](cases/rail-transfer-demo.json)使用 12 m 长列车和两台 10 × 5 m 的示例占地包络，无预填机位或中间调姿点。两张 A3 图仅含几何、力的最终标注及图签；超限、缺资料和区间明细在工作台查看。此输入用于桌面计算接口，已有 CLI 双机接口仍按单个工况分载。
 

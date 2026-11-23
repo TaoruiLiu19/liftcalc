@@ -111,8 +111,8 @@ def eye_figure(result: ComputationResult) -> Figure | None:
         Circle(cx=0.0, cy=0.0, r=d / 2),
         Line(x1=-(d / 2 + 10), y1=0.0, x2=(d / 2 + 10), y2=0.0, layer=LAYER_CENTER),
         Line(x1=0.0, y1=-(d / 2 + 10), x2=0.0, y2=(d / 2 + 10), layer=LAYER_CENTER),
-        Text(x=x0, y=y1 + 3.5, content=f"板 {plate['b_mm']:.0f}×{plate['h_mm']:.0f}×{plate['t_mm']:.0f}"),
-        Text(x=x0, y=y0 - 3.5, content=f"孔径 d={d:.0f}   孔边距 e={e:.0f}", height=3.5),
+        Text(x=x0, y=y1 + 3.5, content=f"板 {plate['b_mm']:.0f}×{plate['h_mm']:.0f}×{plate['t_mm']:.0f} mm"),
+        Text(x=x0, y=y0 - 3.5, content=f"孔径 d={d:.0f} mm   孔边距 e={e:.0f} mm", height=3.5),
         Text(x=x1 + 4, y=1.75, content="受力方向", layer=LAYER_DIM),
         Line(x1=x1, y1=0.0, x2=x1 + 18, y2=0.0, layer=LAYER_DIM),
         Line(x1=x1 + 18, y1=0.0, x2=x1 + 12, y2=3.0, layer=LAYER_DIM),
@@ -145,7 +145,7 @@ def section_figure(result: ComputationResult) -> Figure | None:
         Line(x1=cx - mark, y1=cy, x2=cx + mark, y2=cy, layer=LAYER_CENTER),
         Line(x1=cx, y1=cy - mark, x2=cx, y2=cy + mark, layer=LAYER_CENTER),
         Text(x=cx + mark, y=cy + mark + 3.5, content="形心", height=3.5, layer=LAYER_TEXT),
-        Text(x=x0, y=y0 - 3.5, content=f"外包 {width:.0f} × {height:.0f}", height=3.5,
+        Text(x=x0, y=y0 - 3.5, content=f"外包 {width:.0f} × {height:.0f} mm", height=3.5,
              layer=LAYER_NOTE),
     )
     return _fit_paper(figure)
@@ -199,7 +199,7 @@ def capability_figure(result: ComputationResult) -> Figure | None:
         figure.add(Polyline(points=pts, closed=False))
         figure.add(
             Text(x=pts[0][0] - 1.5, y=pts[0][1] + 1.0,
-                 content=f"{boom:g}m", height=2.8, align=ALIGN_RIGHT, layer=LAYER_DIM)
+                 content=f"{boom:g} m", height=2.8, align=ALIGN_RIGHT, layer=LAYER_DIM)
         )
 
     required = float(cap.get("required") or 0.0)
@@ -547,25 +547,25 @@ def _draw_dimensions(figure: Figure, paper: _Paper, model: ElevationModel,
     # Hz：地面 → 臂端滑轮中心
     D.dashed(figure, (hz_x + 1.0, tip_y), (tip_x, tip_y), layer=LAYER_THIN)
     D.v_dim(figure, ground, tip_y, hz_x,
-            f"Hz={model.tip_height:.2f}", ref_x=tip_x, side="left", ext_ends=("hi",))
+            f"Hz={model.tip_height:.2f} m", ref_x=tip_x, side="left", ext_ends=("hi",))
     # H：地面 → 吊钩中心
     D.dashed(figure, (h_x + 1.0, hook_y), (hook_x, hook_y), layer=LAYER_THIN)
     D.v_dim(figure, ground, hook_y, h_x,
-            f"H={model.hook_h:.2f}", ref_x=hook_x, side="left", ext_ends=("hi",))
+            f"H={model.hook_h:.2f} m", ref_x=hook_x, side="left", ext_ends=("hi",))
     # h1~h3：吊物底 / 吊物高 / 吊索高
     D.v_dim(figure, ground, load_bottom_y, hx_x,
-            f"h1={model.load_bottom:.2f}", ref_x=x_left + 2.0, side="left",
+            f"h1={model.load_bottom:.2f} m", ref_x=x_left + 2.0, side="left",
             ext_ends=("hi",))
     D.v_dim(figure, load_bottom_y, load_top_y, hx_x,
-            f"h2={model.load_h:.2f}", ref_x=x_left + 2.0, side="left")
+            f"h2={model.load_h:.2f} m", ref_x=x_left + 2.0, side="left")
     D.v_dim(figure, load_top_y, hook_y, hx_x,
-            f"h3={model.sling_drop:.2f}", ref_x=x_left + 2.0, side="left")
+            f"h3={model.sling_drop:.2f} m", ref_x=x_left + 2.0, side="left")
     # h0：吊钩中心 → 臂端
     h0_x = hook_x - 26.0
     D.dashed(figure, (h0_x + 1.0, hook_y), (hook_x, hook_y), layer=LAYER_THIN)
     D.dashed(figure, (h0_x + 1.0, tip_y), (tip_x, tip_y), layer=LAYER_THIN)
     D.v_dim(figure, hook_y, tip_y, h0_x,
-            f"h0={model.tip_height - model.hook_h:.2f}", side="left")
+            f"h0={model.tip_height - model.hook_h:.2f} m", side="left")
 
     # 吊索真实夹角含宽度方向分量，立面画不出来，数值统一放在「吊物与吊索」表里
 
@@ -576,16 +576,16 @@ def _draw_dimensions(figure: Figure, paper: _Paper, model: ElevationModel,
     y_f = ground - 8.0
     y_r = ground - 16.0
     if near_edge > 0.05:
-        D.h_dim(figure, axis_x, near_x, y_f, f"f={near_edge:.2f}",
+        D.h_dim(figure, axis_x, near_x, y_f, f"f={near_edge:.2f} m",
                 ref_y=ground, above=True)
-    D.h_dim(figure, near_x, far_x, y_f, f"g={model.load_w:.2f}", ref_y=ground, above=True)
-    D.h_dim(figure, axis_x, hook_x, y_r, f"R={model.radius:.2f}", ref_y=ground, above=True)
+    D.h_dim(figure, near_x, far_x, y_f, f"g={model.load_w:.2f} m", ref_y=ground, above=True)
+    D.h_dim(figure, axis_x, hook_x, y_r, f"R={model.radius:.2f} m", ref_y=ground, above=True)
 
     # L：沿臂长
     foot = paper(*model.hinge)
     tip_pt = paper(*model.tip)
     D.aligned_dim(figure, foot, tip_pt, -(_boom_half(0.5) * paper.s + 6.0),
-                  f"L={model.boom_len:.2f}", height=3.0)
+                  f"L={model.boom_len:.2f} m", height=3.0)
 
     # 仰角：文字放在弧外靠近地面的那一侧，避开臂架
     arc_r = 13.0
@@ -595,7 +595,7 @@ def _draw_dimensions(figure: Figure, paper: _Paper, model: ElevationModel,
 
     # E：地面 → 臂架铰点
     front_x = paper(-BODY_FRONT, 0.0)[0]
-    D.v_dim(figure, ground, foot[1], front_x + 4.0, f"E={HINGE_H:.2f}",
+    D.v_dim(figure, ground, foot[1], front_x + 4.0, f"E={HINGE_H:.2f} m",
             ref_x=front_x, side="right")
 
 
@@ -690,7 +690,7 @@ def _load_table_rows(model: ElevationModel, load: dict[str, Any]) -> list[tuple[
             rows.append(
                 (
                     f"索{item['index']} {item['name']}",
-                    f"{float(item['angle_deg']):.1f}°　{float(item['force_t']):.2f} t",
+                    f"{float(item['angle_deg']):.1f}°　{float(item['force_t'])*9.80665:.2f} kN",
                 )
             )
     rows.append(("所需起升高度", f"{model.hook_h:.2f} m"))
@@ -793,13 +793,13 @@ def _build_sheet_view(model: ElevationModel, model_notes: list[str],
     # ---- 说明 ------------------------------------------------------------
     slings = load.get("slings") or []
     angles = [float(item["angle_deg"]) for item in slings]
-    forces = [float(item["force_t"]) for item in slings]
+    forces = [float(item["force_t"])*9.80665 for item in slings]
     notes = [
         f"比例 1:{denom_value}（A3 竖幅），单位 m；R 量至吊钩中心，额定值按第 7 条取下一档。",
         f"吊物按真实尺寸 {model.load_w:.2f}×{model.load_d:.2f}×{model.load_h:.2f} m 绘制，"
         f"宽 {model.load_d:.2f} m 为出图面方向。",
-        f"所需起升高度 {model.hook_h:.2f} m = 净空 {max(model.load_bottom, 0.0):.2f} + "
-        f"吊物高 {model.load_h:.2f} + 吊索高 {model.sling_drop:.2f} m（推算）。",
+        f"所需起升高度 {model.hook_h:.2f} m = 净空 {max(model.load_bottom, 0.0):.2f} m + "
+        f"吊物高 {model.load_h:.2f} m + 捆扎后索具净高 {model.sling_drop:.2f} m。",
     ]
     if slings:
         if max(angles) - min(angles) < 0.05:
@@ -807,10 +807,10 @@ def _build_sheet_view(model: ElevationModel, model_notes: list[str],
         else:
             angle_text = f"四索与竖直夹角 {min(angles):.1f}°~{max(angles):.1f}°"
         if max(forces) - min(forces) < 0.005:
-            force_text = f"索力均为 {forces[0]:.2f} t"
+            force_text = f"索力均为 {forces[0]:.2f} kN"
         else:
             force_text = (
-                f"索力 {min(forces):.2f}~{max(forces):.2f} t（重心偏心使四索受力不均）"
+                f"索力 {min(forces):.2f}~{max(forces):.2f} kN（重心偏心使四索受力不均）"
             )
         notes.append(f"{angle_text}，{force_text}。")
     notes.append("圆+双弧为形心/重心符号；本图为能力反查示意，不作为施工依据。")

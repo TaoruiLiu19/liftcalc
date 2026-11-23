@@ -146,7 +146,7 @@ def load_figure(result: ComputationResult) -> Figure | None:
     axis_z = apex[2] + 0.9
     for vector, label, offset, align in (
         ((axis_xy, 0.0, 0.0), "x（长度，远离吊车）", (2.4, -1.2), ALIGN_LEFT),
-        ((0.0, axis_xy, 0.0), f"y（宽度 B={width:.2f}）", (0.0, 4.2), ALIGN_CENTER),
+        ((0.0, axis_xy, 0.0), f"y（宽度 B={width:.2f} m）", (0.0, 4.2), ALIGN_CENTER),
         ((0.0, 0.0, axis_z), "z（竖向）", (2.4, 1.0), ALIGN_LEFT),
     ):
         tail = frame(0.0, 0.0, 0.0)
@@ -230,10 +230,10 @@ def load_figure(result: ComputationResult) -> Figure | None:
                             "x 指向远离吊车",
                     height=2.8, layer=LAYER_NOTE))
     if slings:
-        forces = [float(item["force_t"]) for item in slings]
+        forces = [float(item["force_t"])*9.80665 for item in slings]
         angles = [float(item["angle_deg"]) for item in slings]
         figure.add(Text(x=PAGE_W - 8.0, y=12.0,
-                        content=f"索力 {min(forces):.2f}–{max(forces):.2f} t",
+                        content=f"索力 {min(forces):.2f}–{max(forces):.2f} kN",
                         height=3.2, align=ALIGN_RIGHT))
         figure.add(Text(x=PAGE_W - 8.0, y=7.6,
                         content=f"与竖直夹角 {min(angles):.1f}°–{max(angles):.1f}°",

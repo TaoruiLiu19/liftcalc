@@ -4,6 +4,8 @@ import type { Model, TransferResult } from './types'
 import SheetViewer from './SheetViewer.vue'
 
 import TransferPlot from './TransferPlot.vue'
+import RiggingHeight from './RiggingHeight.vue'
+import { riggingRise, type RiggingMeasurement } from './riggingHeight'
 import NumberEntry from './NumberEntry.vue'
 
 const props = defineProps<{models: Model[]}>()
@@ -11,7 +13,7 @@ const form = reactive({
   length: 12, width: 3, height: 3, mass: 16, cg: [0,0,0], lugs: [[-5,0],[5,0]],
   start: [-11,0,90], auto_route: true, auto_stations: true, end: [11,0,90], bottom: 1, factor: 1.1, gauge: 1.435,
   cranes: [-1,1].map(sign => ({index: -1, boom: 0, center: [0,sign*5.5], footprint_length: 10, footprint_width: 5, heading: 0, boom_buffer: 1,
-    hook: null as number|null, hook_rating: null as number|null, rigging: 0.3, sling_height: 2,
+    hook: null as number|null, hook_rating: null as number|null, rigging: 0.3, sling: {datum:'top',value:null} as RiggingMeasurement,
     verified_height: null as number|null})),
   obstacles: [] as number[][],
 })
@@ -43,7 +45,7 @@ function advance(target = step.value + 1) {
     editor.value?.querySelector<HTMLInputElement>('input:invalid')?.focus()
     return
   }
-  if (step.value===0 && geometryError.value) return
+  if (step.value===0 && (geometryError.value || form.cranes.some(c=>(riggingRise(c.sling,form.height) ?? 0)<=0))) return
   if (target === 4 && !result.value) { void calculate(); return }
   goto(target)
 }
@@ -121,9 +123,9 @@ async function calculate() {
   const id=revision
   busy.value=true; error.value=''
   try {
-    const cranes=form.cranes.map(({index,center,heading,...c})=>{
+    const cranes=form.cranes.map(({index,center,heading,sling,...c})=>{
       const m=props.models[index]
-      return {...c, ...(form.auto_stations?{}:{center,heading}), verified_height:c.verified_height || null,model:m.model,brand:m.brand,config:m.config}
+      return {...c,sling_height:riggingRise(sling,form.height), ...(form.auto_stations?{}:{center,heading}), verified_height:c.verified_height || null,model:m.model,brand:m.brand,config:m.config}
     })
     const data=await window.pywebview!.api.calculate({kind:'rail.transfer',transfer:{...form,cranes}})
     if(id===revision){result.value=data;active.value=0;goto(4)}
@@ -142,8 +144,8 @@ async function save(i:number){
 }
 const sizeFields = {length:'长 / m', width:'宽 / m', height:'高 / m', mass:'质量 / t'} as const
 const verdict=computed(()=>result.value?.segments.some(s=>s.unsafe.length)?'fail':result.value?.segments.some(s=>s.unknown.length)?'pending':'pass')
-const craneFields=['boom_buffer','hook','hook_rating','rigging','sling_height','verified_height'] as const
-const craneLabels=['臂投影包络半宽 / m','主钩自重 / t','主钩额载 / t','本侧索具 / t','吊点至钩高差 / m','全段已核实可用钩高下限 / m（选填）']
+const craneFields=['boom_buffer','hook','hook_rating','rigging','verified_height'] as const
+const craneLabels=['臂投影包络半宽 / m','主钩自重 / t','主钩额载 / t','本侧索具 / t','全段已核实可用钩高下限 / m（选填）']
 </script>
 <template>
 <main class="transfer"><div class="workflow">
@@ -162,6 +164,10 @@ const craneLabels=['臂投影包络半宽 / m','主钩自重 / t','主钩额载 
         <section class="block"><h3>吊物尺寸与质量</h3>
           <div class="four"><NumberEntry v-for="(label,key) in sizeFields" :key="key" v-model="form[key]" :label="label" :min=".000001" :attempted="attempted"/></div>
         </section>
+        <div class="pair">
+          <RiggingHeight v-for="(c,i) in form.cranes" :key="i" v-model="c.sling"
+            :label="('AB'[i])+' 侧索具捆扎后高度'" :body-height="form.height" :attempted="attempted"/>
+        </div>
         <div class="columns">
           <TransferPlot v-bind="scene" @place="place"/>
           <section class="block point-editor" :class="{invalid:geometryError}"><h3>选择编辑点</h3>

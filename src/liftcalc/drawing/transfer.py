@@ -52,20 +52,20 @@ def statics(case, result, corners):
         side = "left" if j==0 else "right"
         offset = -1 if j==0 else 1
         edge = left if j==0 else right
-        dim.v_dim(fig,y1,top,edge+offset*10,f"{case.cranes[j].sling_height:.2f}",
+        dim.v_dim(fig,y1,top,edge+offset*10,f"{case.cranes[j].sling_height:.2f} m",
                   ref_x=x(p),side=side)
-        dim.v_dim(fig,ground,top,edge+offset*23,f"{tag} 钩高 {hook_z[j]:.2f}",
+        dim.v_dim(fig,ground,top,edge+offset*23,f"{tag} 钩高 {hook_z[j]:.2f} m",
                   ref_x=edge,side=side)
     gy = y0+k*(case.cg[2]+case.height/2)
     fig.add(Circle(x(case.cg),gy,1.5),Line(x(case.cg),gy,x(case.cg),gy-9,"RIGGING"),
             Text(x(case.cg)+2,gy-5,"W",height=3.2))
     dim.arrow(fig,x(case.cg),gy-9,0,-1,layer="RIGGING")
-    dim.v_dim(fig,y0,y1,right+10,f"H={case.height:.2f}",ref_x=right,side="right")
-    dim.v_dim(fig,ground,y0,left-10,f"{case.bottom:.2f}",ref_x=left)
+    dim.v_dim(fig,y0,y1,right+10,f"H={case.height:.2f} m",ref_x=right,side="right")
+    dim.v_dim(fig,ground,y0,left-10,f"{case.bottom:.2f} m",ref_x=left)
     for tag,lug in zip("AB",(a,b)):
         dist = abs(station(lug)-station(case.cg))
-        dim.h_dim(fig,x(lug),x(case.cg),175,f"{tag}G  {dist:.2f}",ref_y=y0)
-    dim.h_dim(fig,x(a),x(b),163,f"AB  {span:.2f}",ref_y=y0)
+        dim.h_dim(fig,x(lug),x(case.cg),175,f"{tag}G  {dist:.2f} m",ref_y=y0)
+    dim.h_dim(fig,x(a),x(b),163,f"AB  {span:.2f} m",ref_y=y0)
     fig.add(Text(36,146,"吊点布置 · 顶视",height=4),
             Polyline(tuple((149+k*u,99+k*v) for u,v in corners)))
     pts = [(149+k*p[0],99+k*p[1]) for p in (a,b,case.cg)]
@@ -74,14 +74,14 @@ def statics(case, result, corners):
         fig.add(Circle(px,py,1.7),Text(px+2,py+4,name,height=3.2))
         cross(fig,px,py,3)
     dim.h_dim(fig,149-k*case.length/2,149+k*case.length/2,60,
-              f"L  {case.length:.2f}",ref_y=99-k*case.width/2)
+              f"L  {case.length:.2f} m",ref_y=99-k*case.width/2)
     dim.v_dim(fig,99-k*case.width/2,99+k*case.width/2,149+k*case.length/2+7,
-              f"B={case.width:.2f}",ref_x=149+k*case.length/2,side="right")
+              f"B={case.width:.2f} m",ref_x=149+k*case.length/2,side="right")
     fig.add(Text(271,138,"点位坐标 / m",height=4),
             Text(271,129,"原点为车体形心，Z 向上",height=3))
     coordinates = [("点","X","Y","Z")]
     for name,p in zip("ABG",((*a,case.height/2),(*b,case.height/2),case.cg)):
-        coordinates.append((name,*(f"{v:.2f}" for v in p)))
+        coordinates.append((name,*(f"{v:.2f} m" for v in p)))
     for i,values in enumerate(coordinates):
         row = 117-i*9
         for col,value in enumerate(values):
