@@ -20,7 +20,6 @@ from liftcalc.drawing import dim as D
 from liftcalc.drawing import sheet as S
 from liftcalc.drawing.body import (
     BODY_MODEL_FRONT,
-    RAM_BASE,
     draw_truck,
     drawing_axles,
 )
@@ -241,6 +240,7 @@ class ElevationModel:
     cg_y: float = 0.0
     cg_z: float = 0.0
     lug_inset: float = 0.0
+    hook_offset_x: float = 0.0
 
     @property
     def rad(self) -> float:
@@ -284,7 +284,7 @@ class ElevationModel:
 
     @property
     def load_center(self) -> tuple[float, float]:
-        return self.radius, (self.load_top + self.load_bottom) / 2.0
+        return self.radius - self.hook_offset_x, (self.load_top + self.load_bottom) / 2.0
 
     @property
     def cg(self) -> tuple[float, float]:
@@ -360,6 +360,7 @@ def _elevation_model(cap: dict[str, Any], detail: dict[str, Any],
         cg_y=float(cg.get("y") or 0.0),
         cg_z=float(cg.get("z") or 0.0),
         lug_inset=float(load.get("lug_inset_m") or 0.0),
+        hook_offset_x=load.get("hook_xy_m", (0.0, 0.0))[0],
     )
     return model, notes
 
@@ -418,20 +419,6 @@ def _draw_boom(figure: Figure, paper: _Paper, model: ElevationModel) -> None:
         figure.add(Line(*along(near + heel + .10, half * .64),
                         *along(far - collar, half * .64), LAYER_THIN))
 
-    base = paper(*RAM_BASE)
-    head = along(model.boom_len * .28, -_boom_half(.28) - .10)
-    dx, dy = head[0] - base[0], head[1] - base[1]
-    span = math.hypot(dx, dy)
-    def cylinder_point(fraction, width):
-        return (base[0] + dx * fraction - dy / span * width * paper.s,
-                base[1] + dy * fraction + dx / span * width * paper.s)
-
-    for start, end, width in ((0, .56, .20), (.56, 1, .105)):
-        figure.add(Polyline(tuple(cylinder_point(pos, side) for pos, side in
-                                  ((start, width), (end, width), (end, -width), (start, -width))),
-                            True, LAYER_OUTLINE))
-    pin(base, .18)
-    pin(head, .15)
     pin(along(0, 0), .26)
     pin(along(0, 0), .11)
     length = model.boom_len
@@ -509,7 +496,7 @@ def centroid_symbol(figure: Figure, paper: _Paper, x: float, y: float,
 
 
 def _draw_load(figure: Figure, paper: _Paper, model: ElevationModel) -> None:
-    x = model.radius
+    x, _ = model.load_center
     half = model.load_w / 2.0
     top, bottom = model.load_top, model.load_bottom
 
@@ -544,7 +531,9 @@ def _draw_load(figure: Figure, paper: _Paper, model: ElevationModel) -> None:
 
 def _draw_dimensions(figure: Figure, paper: _Paper, model: ElevationModel,
                      *, derived_angle: bool) -> None:
-    x_left = paper(model.radius + model.load_w / 2.0, 0.0)[0]   # 吊物远边（图左）
+    center_x, _ = model.load_center
+    near_edge = center_x - model.load_w / 2.0
+    x_left = paper(center_x + model.load_w / 2.0, 0.0)[0]   # 吊物远边（图左）
     ground = paper.oy
     hook_x, hook_y = paper(model.radius, model.hook_h)
     tip_x, tip_y = paper(*model.tip)
@@ -582,12 +571,12 @@ def _draw_dimensions(figure: Figure, paper: _Paper, model: ElevationModel,
 
     # R / f / g：地面以下
     axis_x = paper.ox
-    near_x = paper(model.radius - model.load_w / 2.0, 0.0)[0]
+    near_x = paper(near_edge, 0.0)[0]
     far_x = x_left
     y_f = ground - 8.0
     y_r = ground - 16.0
-    if model.radius - model.load_w / 2.0 > 0.05:
-        D.h_dim(figure, axis_x, near_x, y_f, f"f={model.radius - model.load_w / 2.0:.2f}",
+    if near_edge > 0.05:
+        D.h_dim(figure, axis_x, near_x, y_f, f"f={near_edge:.2f}",
                 ref_y=ground, above=True)
     D.h_dim(figure, near_x, far_x, y_f, f"g={model.load_w:.2f}", ref_y=ground, above=True)
     D.h_dim(figure, axis_x, hook_x, y_r, f"R={model.radius:.2f}", ref_y=ground, above=True)
@@ -634,7 +623,7 @@ def _draw_markers(figure: Figure, paper: _Paper, model: ElevationModel) -> None:
              align=ALIGN_RIGHT)
 
     # 索具
-    sling_mid = paper(model.radius - model.load_w / 4.0,
+    sling_mid = paper((model.radius + model.load_center[0] - model.lug_x) / 2.0,
                       (model.hook_h + model.load_top) / 2.0)
     D.leader(figure, sling_mid, (sling_mid[0] - 6.0, sling_mid[1] - 2.0), "索具",
              align=ALIGN_RIGHT)

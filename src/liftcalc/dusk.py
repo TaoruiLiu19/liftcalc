@@ -86,11 +86,24 @@ class DesktopApi:
         self._window = None
         self._lock = RLock()
         self._snapshot = None
+        self._transfer_sheets = {}
 
     def models(self):
         return self._repo.workbench_models()
 
     def calculate(self, case):
+        if case.get("kind") == "rail.transfer":
+            from liftcalc.crane.transfer import Transfer, plan_transfer
+            from liftcalc.drawing.transfer import sheets
+
+            inputs = Transfer.model_validate(case["transfer"])
+            inputs, result = plan_transfer(inputs, self._repo)
+            drawings = sheets(inputs, result)
+            tokens = [uuid.uuid4().hex for _ in drawings]
+            with self._lock:
+                self._transfer_sheets = dict(zip(tokens, drawings))
+            return {**result, "poses": inputs.route, "stations": [dict(center=c.center, heading=c.heading) for c in inputs.cranes], "drawings": [{"id": token, "svg": to_svg(sheet, margin=0)}
+                                            for token, sheet in zip(tokens, drawings)]}
         if case.get("kind") != "crane.capability" or case.get("mode", "single") != "single":
             raise ValueError("此工作台仅支持单机")
         if not 0 < float(case.get("limit", .9)) <= 1 or not float(case["payload"]) > 0:
@@ -107,6 +120,8 @@ class DesktopApi:
 
     def _get(self, token):
         with self._lock:
+            if token in self._transfer_sheets:
+                return None, self._transfer_sheets[token]
             if not self._snapshot or token != self._snapshot[0]:
                 raise ValueError("结果已变更，请重新计算")
             return self._snapshot[1:]
@@ -122,7 +137,7 @@ class DesktopApi:
     def render(self, token: str, fmt: str) -> tuple[bytes, str]:
         """导出文件的字节内容（原生保存对话框和浏览器下载共用）。"""
         result, sheet = self._get(token)
-        if fmt not in FORMATS or (not sheet and fmt != "docx"):
+        if fmt not in FORMATS or (result is None and fmt == "docx") or (not sheet and fmt != "docx"):
             raise ValueError("不支持该导出")
         name = f"liftcalc-{token[:8]}.{fmt}"
         if fmt == "docx":

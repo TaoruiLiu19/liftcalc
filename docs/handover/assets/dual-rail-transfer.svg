@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="780" height="364" viewBox="0 0 780 364" role="img" aria-labelledby="title desc">
+  <title id="title">列车上轨 · 双机俯视概念图</title>
+  <desc id="desc">三幅图的方位相同。列车从左侧起吊，两台吊车分别对应车体前后吊点。车体向右移动并转正，最终与右侧轨道对齐。</desc>
+  <defs>
+    <pattern id="sleepers" width="32" height="12" patternUnits="userSpaceOnUse">
+      <path d="M0 6h32" stroke="#adb9c0" stroke-width="4"/>
+    </pattern>
+    <g id="crane" stroke="#965918" stroke-width="1.6">
+      <path d="M-16 -13h32m-32 26h32" stroke-width="4"/>
+      <rect x="-10" y="-22" width="20" height="44" rx="4" fill="#f4c879"/>
+      <rect x="-7" y="-18" width="14" height="8" rx="2" fill="#fff4dc"/>
+    </g>
+    <g id="site">
+      <rect x="173" y="24" width="32" height="274" fill="url(#sleepers)"/>
+      <path d="M181 24v274m16 -274v274" fill="none" stroke="#6e808b" stroke-width="2.5"/>
+      <path d="M189 24v274" stroke="#83939c" stroke-dasharray="5 4"/>
+      <use xlink:href="#crane" transform="translate(118 49)"/>
+      <use xlink:href="#crane" transform="translate(118 271)"/>
+      <g fill="#714311" font-size="14" font-weight="bold">
+        <text x="89" y="54">A</text><text x="89" y="276">B</text>
+      </g>
+    </g>
+    <g id="train" stroke="#126b75">
+      <rect x="-14" y="-67" width="28" height="134" rx="8" fill="#dbf1ef" stroke-width="2"/>
+      <rect x="-10" y="-38" width="20" height="76" rx="4" fill="#b2dcd9"/>
+      <path d="M-8 -58h16m-16 116h16" stroke-width="3"/>
+    </g>
+    <g id="lugs" fill="#fff" stroke="#075c65" stroke-width="2.5">
+      <circle cy="-48" r="4"/><circle cy="48" r="4"/>
+    </g>
+    <g id="pivots" fill="#fff4dc" stroke="#965918" stroke-width="2">
+      <circle cx="118" cy="49" r="3"/><circle cx="118" cy="271" r="3"/>
+    </g>
+  </defs>
+  <rect width="780" height="364" fill="#fff"/>
+  <g font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#223d47">
+    <g font-size="18" font-weight="bold">
+      <text x="24" y="32">起吊位置</text><text x="284" y="32">横移与转向</text><text x="544" y="32">对轨落位</text>
+    </g>
+    <path d="M260 18v326m260 -326v326" stroke="#d4dfe2"/>
+    <g transform="translate(21 34)">
+      <use xlink:href="#site"/>
+      <use xlink:href="#train" transform="translate(53 160) rotate(-14)"/>
+      <path d="M118 49L41.39 113.43M118 271L64.61 206.57" fill="none" stroke="#aa661b" stroke-width="4"/>
+      <use xlink:href="#lugs" transform="translate(53 160) rotate(-14)"/>
+      <use xlink:href="#pivots"/>
+    </g>
+    <g transform="translate(281 34)">
+      <use xlink:href="#site"/>
+      <use xlink:href="#train" transform="translate(115 160) rotate(-7)"/>
+      <path d="M118 49L109.15 112.36M118 271L120.85 207.64" fill="none" stroke="#aa661b" stroke-width="4"/>
+      <use xlink:href="#lugs" transform="translate(115 160) rotate(-7)"/>
+      <use xlink:href="#pivots"/>
+    </g>
+    <g transform="translate(541 34)">
+      <use xlink:href="#site"/>
+      <use xlink:href="#train" transform="translate(189 160)"/>
+      <path d="M118 49L189 112M118 271L189 208" fill="none" stroke="#aa661b" stroke-width="4"/>
+      <use xlink:href="#lugs" transform="translate(189 160)"/>
+      <use xlink:href="#pivots"/>
+    </g>
+    <text x="24" y="351" font-size="13" fill="#46626c">俯视 · A、B 为两台吊机 · 圆环为车体吊点 · 姿态示意，未校核轨迹</text>
+  </g>
+</svg>

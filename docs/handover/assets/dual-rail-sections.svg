@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 535" width="900" height="535" role="img" aria-labelledby="title desc">
+  <title id="title">横移帧 · 两机径向立面与车体纵向受力</title>
+  <desc id="desc">两机分别沿回转中心至吊钩作径向立面。图下方为车体静力简图，A、B 吊点反力向上，重心处重力向下。所有长度与角度均为符号。</desc>
+  <defs>
+    <marker id="force" viewBox="0 0 10 8" refX="9" refY="4" markerWidth="10" markerHeight="8" orient="auto">
+      <path d="M0 0L10 4 0 8z" fill="#a64227"/>
+    </marker>
+  </defs>
+  <rect width="900" height="535" fill="white"/>
+  <g font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#193e49">
+    <text x="26" y="32" font-size="22" font-weight="bold">横移帧 · 吊臂姿态与车体受力</text>
+    <text x="27" y="57" font-size="14">同一时刻，A、B 各沿本机回转中心至吊钩的方向剖视。各图独立示意，尺寸待工况确定。</text>
+    <path d="M450 72v187M24 277h852" stroke="#c1cdd0"/>
+    <g font-size="16">
+      <text x="28" y="92">A 机径向立面</text><text x="473" y="92">B 机径向立面</text>
+    </g>
+    <g stroke="#354e58" fill="none" stroke-linejoin="round">
+      <path d="M40 222h360m85 0h360" stroke="#89999e"/>
+      <path d="M58 221v-15h102v15zm27 -15 12 -20h15l8 20zm418 15v-15h102v15zm27 -15 12 -20h15l8 20z"/>
+      <path d="M101 188l207 -86 3 5 -207 87zM546 188l170 -95 3 5 -170 96z" fill="#e0e9eb"/>
+      <path d="M309 106v50q-1 8 -6 3M718 97v51q-1 8 -6 3"/>
+      <path d="M103 192h68m377 0h68" stroke-dasharray="4 3"/>
+      <path d="M143 192a40 40 0 0 0 -3 -15m448 15a40 40 0 0 0 -5 -20" stroke="#a64227"/>
+      <path d="M103 196v60m206 -92v92m239 -60v60m170 -99v99" stroke="#8b9ba0" stroke-dasharray="4 4"/>
+      <path d="M103 248h206m239 0h170m-615 -5v10m206 -10v10m239 -10v10m170 -10v10"/>
+      <path d="M311 160h62m-15 0v62m-5 -62h10m-10 62h10m357 -70h60m-14 0v70m-5 -70h10m-10 70h10"/>
+    </g>
+    <g font-size="15">
+      <text x="151" y="184">αA</text><text x="596" y="181">αB</text>
+      <text x="154" y="240">工作幅度 RA</text><text x="583" y="240">工作幅度 RB</text>
+      <text x="364" y="193">HA</text><text x="775" y="190">HB</text>
+      <text x="28" y="268">α 为臂轴对水平线的仰角</text><text x="473" y="268">H 为吊钩承载点距共同地面基准的高度</text>
+    </g>
+    <text x="28" y="309" font-size="18" font-weight="bold">车体纵向自由体图</text>
+    <g stroke="#34636a" fill="none">
+      <rect x="52" y="382" width="456" height="29" rx="6" fill="#e3f1f0"/>
+      <path d="M111 408v49m133 -55v55m205 -49v49" stroke-dasharray="4 4"/>
+      <path d="M111 448h338m-338 -5v10m133 -10v10m205 -10v10"/>
+    </g>
+    <circle cx="244" cy="396" r="3.5" fill="#a64227"/>
+    <g stroke="#a64227" stroke-width="2.5" marker-end="url(#force)">
+      <path d="M111 382v-42"/><path d="M449 382v-42"/><path d="M244 396v42"/>
+    </g>
+    <g font-size="16">
+      <text x="121" y="348">FA</text><text x="459" y="348">FB</text>
+      <text x="98" y="402">A</text><text x="437" y="402">B</text>
+      <text x="253" y="400">G</text><text x="254" y="434">W</text>
+      <text x="168" y="468">a</text><text x="340" y="468">b</text>
+      <text x="550" y="350">车体水平、准静态、两吊点竖向承载</text>
+      <text x="550" y="385">FA + FB = W</text>
+      <text x="550" y="414">FA = W b / (a + b)</text>
+      <text x="550" y="443">FB = W a / (a + b)</text>
+    </g>
+    <text x="28" y="502" font-size="14">W 为车体重力，FA、FB 为车体吊点竖向合力（kN）。两机吊钩、索具自重需另行计入各机总吊重。</text>
+    <text x="28" y="523" font-size="13">A、B 两端的实际吊钩高度取决于车体姿态与各端索具几何。图中未给场地高程、过程净空或动态载荷。</text>
+  </g>
+</svg>

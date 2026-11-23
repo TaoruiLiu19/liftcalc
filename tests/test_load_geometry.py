@@ -16,7 +16,8 @@ from liftcalc.core.errors import InfeasibleSectionError
 from liftcalc.data.importer import build_db
 from liftcalc.data.repo import Repo
 from liftcalc.drawing.figures import elevation_figure, figures_for
-from liftcalc.drawing.primitives import Text, item_bbox
+from liftcalc.drawing.primitives import Circle, Text, item_bbox
+from liftcalc.drawing.style import LAYER_CENTER, LAYER_RIGGING
 from liftcalc.lifting import load_geometry as G
 from liftcalc.report.render import render_report
 from liftcalc.services.calc import run_case
@@ -104,6 +105,17 @@ def test_sling_angle_uses_real_geometry() -> None:
         math.degrees(math.atan2(math.hypot(3.0, 1.5), 4.0))
     )
     assert report.slings[0].length == pytest.approx(math.hypot(math.hypot(3.0, 1.5), 4.0))
+
+
+def test_offset_hook_lengths_balance_horizontal_forces() -> None:
+    shape = _shape(cg_x=-0.8, cg_y=0.3, cg_z=0.25, lug_inset=0.2, sling_height=None)
+    report = G.sling_report(shape, weight_t=10)
+    runs = [math.hypot(lug.x - shape.cg_x, lug.y - shape.cg_y) for lug in G.lugs(shape)]
+    assert report.sling_height == pytest.approx(min(runs) * math.sqrt(3))
+    assert [s.length for s in report.slings] == pytest.approx([math.hypot(r, report.sling_height) for r in runs])
+    for axis in ("x", "y"):
+        hook = getattr(shape, "cg_" + axis)
+        assert sum(s.force_t * (hook - getattr(s, axis)) / s.length for s in report.slings) == pytest.approx(0)
 
 
 def test_default_sling_height_is_sixty_degrees_to_horizontal() -> None:
@@ -230,12 +242,19 @@ def test_elevation_draws_cg_and_sling_table(repo: Repo) -> None:
     # 吊物按真实尺寸：h2 是真实高度、g 是真实长度
     assert "h2=2.50" in texts and "g=6.00" in texts
     assert figure.meta["load_bottom"] == pytest.approx(1.0)
+    model = figure.meta["model"]
+    assert model.cg[0] == pytest.approx(model.radius)
+    assert model.load_center[0] == pytest.approx(model.radius - 0.4)
 
 
 def test_load_figure_has_axes_and_cg(repo: Repo) -> None:
     result = run_case(_case(), repo)
     figures = {figure.title: figure for figure in figures_for(result)}
     load_figure = figures["吊物与重心三维示意"]
+    hook = next(p for p in load_figure.primitives if isinstance(p, Circle) and p.layer == LAYER_RIGGING and p.r == 2.2)
+    cg = next(p for p in load_figure.primitives if isinstance(p, Circle) and p.layer == LAYER_CENTER)
+    assert hook.cx == pytest.approx(cg.cx)
+    assert hook.cy > cg.cy
     texts = " ".join(item.content for item in load_figure.primitives
                      if isinstance(item, Text))
     for expected in ("x（长度，远离吊车）", "y（宽度 B=3.00）", "z（竖向）", "重心 G",
