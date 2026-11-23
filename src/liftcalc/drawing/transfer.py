@@ -69,8 +69,9 @@ def statics(case, result, corners):
 
 def trajectory(case, result, corners):
     poses = [case.pose(s["start"]) for s in result["segments"]]+[case.pose(1)]
-    disks = [(*c.center,c.exclusion) for c in case.cranes]+case.obstacles
+    disks = case.obstacles
     bounds = [world(p,c) for p in poses for c in corners]
+    bounds.extend(p for crane in case.cranes for p in crane.box.corners)
     for x,y,r in disks:
         bounds.extend(((x-r,y-r),(x+r,y+r)))
     rails = [(world(poses[-1],(-case.length*.85,y)),world(poses[-1],(case.length*.85,y)))
@@ -91,15 +92,15 @@ def trajectory(case, result, corners):
     ca,cb = case.cranes
     middle = tuple((a+b)/2 for a,b in zip(ca.center,cb.center))
     gate_pose = min(poses,key=lambda p: math.dist(p[:2],middle))
+    for j,crane in enumerate(case.cranes):
+        px,py = paper(crane.center)
+        fig.add(Polyline(tuple(paper(p) for p in crane.box.corners)),
+                Text(px+2,py+6,"AB"[j]+" 机",height=3),
+                Line(px,py,*paper(world(gate_pose,case.lugs[j])),"NOTE"))
+        cross(fig,px,py,3)
     for j,(x,y,r) in enumerate(disks):
         px,py = paper((x,y))
-        fig.add(Circle(px,py,r*k,"THIN"),Text(px+2,py+6,("AB"[j]+" 机") if j<2 else f"障碍 {j-1}",height=3))
-        if j<2:
-            # Conventional plan symbol centered at the rotation axis (not a footprint).
-            fig.add(Polyline(((px-6,py-2),(px+6,py-2),(px+6,py+2),(px-6,py+2))),
-                    Line(px+3,py-2,px+3,py+2,"THIN"),
-                    Line(px,py,*paper(world(gate_pose,case.lugs[j])),"NOTE"))
-        cross(fig,px,py,3)
+        fig.add(Circle(px,py,r*k,"THIN"),Text(px+2,py+6,f"障碍 {j+1}",height=3))
     legs = len(case.route)-1
     for i in range(legs+1):
         pose = case.pose(i/legs)
@@ -119,9 +120,9 @@ def trajectory(case, result, corners):
     spacing = math.dist(ca.center,cb.center)
     fig.add(Text(36,281,f"P0 起吊  →  P{legs} 落位    ·    中间编号为调姿位置",height=3.7),
             Text(35,34,f"回转中心距  {spacing:.2f} m",height=3.4),
-            Text(35,24,f"禁入圆边界间距  {spacing-ca.exclusion-cb.exclusion:.2f} m",height=3.4),
+            Text(35,24,f"矩形边界净距  {ca.box.distance(cb.box):.2f} m",height=3.4),
             Text(35,14,f"车长  {case.length:g} m     车宽  {case.width:g} m     轨距  {case.gauge:g} m",height=3.4),
-            Text(158,34,"吊机为符号；圆为禁入区",height=3.2),
+            Text(158,34,"矩形为吊机占地包络",height=3.2),
             Line(157,21,171,21,"CENTER"),Text(174,23,"吊点轨迹",height=3.2))
     return fig
 

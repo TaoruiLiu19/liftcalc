@@ -2,19 +2,19 @@
 import { computed, onBeforeUnmount, onDeactivated, ref, watch } from 'vue'
 const props=defineProps<{
   length:number; width:number; points:number[][]; pick:number
-  gauge:number; site?:boolean; preview?:boolean; cranes:{center:number[]; exclusion:number}[]; poses:number[][]; obstacles:number[][]; focus?:number
+  gauge:number; site?:boolean; preview?:boolean; cranes:{center:number[]; footprint_length:number; footprint_width:number; heading:number}[]; poses:number[][]; obstacles:number[][]; focus?:number
 }>()
 const emit=defineEmits<{place:[x:number,y:number]}>()
 const hover=ref<number[]>()
 const W=600,H=316
-function outline(p:number[]){
+function outline(p:number[],length=props.length,width=props.width){
   const a=p[2]*Math.PI/180,c=Math.cos(a),s=Math.sin(a)
   return [[-1,-1],[1,-1],[1,1],[-1,1]].map(([u,v])=>{
-    const x=u*props.length/2,y=v*props.width/2
+    const x=u*length/2,y=v*width/2
     return [p[0]+x*c-y*s,p[1]+x*s+y*c]
   })
 }
-const bodies=computed(()=>props.site?props.poses.map(outline):[outline([0,0,0])])
+const bodies=computed(()=>props.site?props.poses.map(p=>outline(p)):[outline([0,0,0])])
 const progress=ref(0), playing=ref(false)
 let timer:ReturnType<typeof setInterval> | undefined
 function stop(){
@@ -45,10 +45,10 @@ const rails=computed(()=>{
     return [cx+u*Math.cos(a)-v*Math.sin(a),cy+u*Math.sin(a)+v*Math.cos(a)]
   }))
 })
-const disks=computed(()=>props.site?[...props.cranes.map((c,i)=>({p:c.center,r:c.exclusion,label:'AB'[i]+' 机'})),
-  ...props.obstacles.map((o,i)=>({p:o,r:o[2],label:'障碍 '+(i+1)}))]:[])
+const footprints=computed(()=>props.site?props.cranes.map(c=>outline([...c.center,c.heading],c.footprint_length,c.footprint_width)):[])
+const disks=computed(()=>props.site?props.obstacles.map((o,i)=>({p:o,r:o[2],label:'障碍 '+(i+1)})):[])
 const frame=computed(()=>{
-  const pts=[[0,0],...bodies.value.flat(),...rails.value.flat(),...disks.value.flatMap(d=>[[d.p[0]-d.r,d.p[1]-d.r],[+d.p[0]+d.r,+d.p[1]+d.r]])]
+  const pts=[[0,0],...bodies.value.flat(),...footprints.value.flat(),...rails.value.flat(),...disks.value.flatMap(d=>[[d.p[0]-d.r,d.p[1]-d.r],[+d.p[0]+d.r,+d.p[1]+d.r]])]
   const xs=pts.map(p=>p[0]),ys=pts.map(p=>p[1])
   const x0=Math.min(...xs),x1=Math.max(...xs),y0=Math.min(...ys),y1=Math.max(...ys)
   const k=Math.min((W-130)/Math.max(.001,x1-x0),(H-96)/Math.max(.001,y1-y0))
@@ -92,7 +92,9 @@ function locate(e:PointerEvent|MouseEvent){
       <circle v-if="i===pick" r="11" fill="none" stroke="currentColor"/><circle r="5" fill="currentColor"/><text x="7" y="-9">{{'ABG'[i]}}</text>
     </g>
   </template>
-  <template v-else><g v-for="(d,i) in disks" :key="i" :class="['disk',{focus:i===focus}]">
+  <template v-else><g v-for="(box,i) in footprints" :key="'crane'+i" :class="['crane-box',{focus:i===focus}]">
+    <polygon :points="poly(box)"/><text :x="X(cranes[i].center[0])+3" :y="Y(cranes[i].center[1])-3">{{'AB'[i]}} 机</text></g>
+    <g v-for="(d,i) in disks" :key="i" class="disk">
     <circle :cx="X(d.p[0])" :cy="Y(d.p[1])" :r="Math.max(0,d.r*frame.k)"/><text :x="X(d.p[0])+4" :y="Y(d.p[1])-4">{{d.label}}</text></g>
     <text v-for="(p,i) in poses" :key="i" :x="X(p[0])+5" :y="Y(p[1])+16">P{{i}}</text>
   </template>
@@ -100,7 +102,7 @@ function locate(e:PointerEvent|MouseEvent){
 <div v-if="preview" class="playback"><button type="button" @click="play">{{playing?'暂停':'慢速预演'}}</button>
 <label>路径进度 <input aria-label="路径进度" type="range" min="0" max="1" step=".001" v-model.number="progress" @input="stop"></label>
 <span>{{(progress*100).toFixed(0)}}% · {{position[2].toFixed(1)}}°</span></div>
-<p>{{site?'P0 为起吊位置，依次调姿至末点落位；圆为禁入区。':hover?'X '+hover[0].toFixed(3)+' m　 Y '+hover[1].toFixed(3)+' m':'原点 O 在吊物形心，+X 沿车长，+Y 沿车宽。'}}</p></figure>
+<p>{{site?'P0 起吊，末点落位；矩形表示吊机占地，圆表示场地障碍。':hover?'X '+hover[0].toFixed(3)+' m　 Y '+hover[1].toFixed(3)+' m':'原点 O 在吊物形心，+X 沿车长，+Y 沿车宽。'}}</p></figure>
 </template>
 <style scoped>
 figure{margin:0;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--plot)}
@@ -111,5 +113,5 @@ svg{display:block;width:100%;height:auto}.pick{cursor:crosshair}
 text{font:13px 'Microsoft YaHei UI',sans-serif;fill:var(--ink)}.ticks text{font-size:11px;fill:var(--quiet)}
 .playback{display:flex;align-items:center;gap:8px;padding:8px 12px;flex-wrap:wrap}.playback label{display:flex;align-items:center;gap:6px;flex:1}.playback input{flex:1;min-width:60px}.playback span{font-size:12px}.moving{fill:var(--wash);stroke:var(--accent);stroke-width:3}.rails polyline{stroke:var(--quiet);stroke-width:1.4;fill:none}.rails .travel{stroke-dasharray:3 4}.body{fill:var(--wash);stroke:var(--accent);stroke-width:1.5}.end{stroke-dasharray:5 4;fill:none}
 .ab{stroke:var(--accent);stroke-dasharray:5 3;fill:none}.marker{color:var(--accent)}.cg{color:var(--warm)}
-.marker text{fill:currentColor;font-weight:700}.disk circle{stroke:var(--quiet);fill:none}.focus circle{stroke:var(--accent);stroke-width:2;fill:var(--wash)}
+.marker text{fill:currentColor;font-weight:700}.disk circle{stroke:var(--quiet);fill:none}.crane-box polygon{fill:var(--wash);stroke:var(--ink);stroke-width:1.6}.focus polygon{stroke:var(--accent);stroke-width:2;fill:var(--wash)}
 </style>

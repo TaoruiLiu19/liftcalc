@@ -93,16 +93,16 @@ class DesktopApi:
 
     def calculate(self, case):
         if case.get("kind") == "rail.transfer":
-            from liftcalc.crane.transfer import Transfer, analyze
+            from liftcalc.crane.transfer import Transfer, plan_transfer
             from liftcalc.drawing.transfer import sheets
 
             inputs = Transfer.model_validate(case["transfer"])
-            result = analyze(inputs, self._repo)
+            inputs, result = plan_transfer(inputs, self._repo)
             drawings = sheets(inputs, result)
             tokens = [uuid.uuid4().hex for _ in drawings]
             with self._lock:
                 self._transfer_sheets = dict(zip(tokens, drawings))
-            return {**result, "drawings": [{"id": token, "svg": to_svg(sheet, margin=0)}
+            return {**result, "poses": inputs.route, "stations": [dict(center=c.center, heading=c.heading) for c in inputs.cranes], "drawings": [{"id": token, "svg": to_svg(sheet, margin=0)}
                                             for token, sheet in zip(tokens, drawings)]}
         if case.get("kind") != "crane.capability" or case.get("mode", "single") != "single":
             raise ValueError("此工作台仅支持单机")

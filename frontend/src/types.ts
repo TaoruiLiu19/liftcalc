@@ -53,6 +53,8 @@ export type Snapshot = {
   }
 }
 export type TransferResult = {
+  poses: number[][]
+  stations: {center: number[]; heading: number}[]
   drawings: { id: string; svg: string }[]
   shares: number[]
   loads: number[]

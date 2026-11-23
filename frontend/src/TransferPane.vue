@@ -9,8 +9,8 @@ import NumberEntry from './NumberEntry.vue'
 const props = defineProps<{models: Model[]}>()
 const form = reactive({
   length: 12, width: 3, height: 3, mass: 16, cg: [0,0,0], lugs: [[-5,0],[5,0]],
-  start: [-11,0,90], waypoints: [[-10,-.3,6],[0,0,3],[10,0,0]], end: [11,0,90], bottom: 1, factor: 1.1, gauge: 1.435,
-  cranes: [-1,1].map(sign => ({index: -1, boom: 0, center: [0,sign*5.5], exclusion: 3, boom_buffer: 1,
+  start: [-11,0,90], auto_route: true, auto_stations: true, end: [11,0,90], bottom: 1, factor: 1.1, gauge: 1.435,
+  cranes: [-1,1].map(sign => ({index: -1, boom: 0, center: [0,sign*5.5], footprint_length: 10, footprint_width: 5, heading: 0, boom_buffer: 1,
     hook: null as number|null, hook_rating: null as number|null, rigging: 0.3, sling_height: 2,
     verified_height: null as number|null})),
   obstacles: [] as number[][],
@@ -87,14 +87,12 @@ function place(x:number,y:number){
   }
   p[0]=x; p[1]=y
 }
-const scene=computed(()=>({length:form.length,width:form.width,points:points.value,pick:pick.value,
-  gauge:form.gauge,cranes:form.cranes,poses:[form.start,...form.waypoints,form.end],obstacles:form.obstacles}))
-function insertPose(after:number) {
-  const poses=scene.value.poses
-  form.waypoints.splice(after,0,poses[after].map((n,k)=>(n+poses[after+1][k])/2))
-}
-const gap=computed(()=>Math.hypot(form.cranes[1].center[0]-form.cranes[0].center[0],
-  form.cranes[1].center[1]-form.cranes[0].center[1])-form.cranes[0].exclusion-form.cranes[1].exclusion)
+const scene=computed(()=>({
+  length:form.length,width:form.width,points:points.value,pick:pick.value,gauge:form.gauge,
+  cranes:result.value ? form.cranes.map((c,i)=>({...c,...result.value!.stations[i]}))
+    : form.auto_stations ? [] : form.cranes,
+  poses:result.value?.poses ?? [form.start,form.end],obstacles:form.obstacles,
+}))
 const runs=computed(()=>{
   const out:{start:number;end:number;text:string;level:string;leg:number}[]=[]
   for(const s of result.value?.segments ?? []){
@@ -109,9 +107,9 @@ async function calculate() {
   const id=revision
   busy.value=true; error.value=''
   try {
-    const cranes=form.cranes.map(({index,...c})=>{
+    const cranes=form.cranes.map(({index,center,heading,...c})=>{
       const m=props.models[index]
-      return {...c, verified_height:c.verified_height || null,model:m.model,brand:m.brand,config:m.config}
+      return {...c, ...(form.auto_stations?{}:{center,heading}), verified_height:c.verified_height || null,model:m.model,brand:m.brand,config:m.config}
     })
     const data=await window.pywebview!.api.calculate({kind:'rail.transfer',transfer:{...form,cranes}})
     if(id===revision){result.value=data;active.value=0;goto(4)}
@@ -125,8 +123,8 @@ async function save(){
 }
 const sizeFields = {length:'长 / m', width:'宽 / m', height:'高 / m', mass:'质量 / t'} as const
 const verdict=computed(()=>result.value?.segments.some(s=>s.unsafe.length)?'fail':result.value?.segments.some(s=>s.unknown.length)?'pending':'pass')
-const craneFields=['exclusion','boom_buffer','hook','hook_rating','rigging','sling_height','verified_height'] as const
-const craneLabels=['平面禁入半径 / m','臂投影包络半宽 / m','主钩自重 / t','主钩额载 / t','本侧索具 / t','吊点至钩高差 / m','全段已核实可用钩高下限 / m（选填）']
+const craneFields=['boom_buffer','hook','hook_rating','rigging','sling_height','verified_height'] as const
+const craneLabels=['臂投影包络半宽 / m','主钩自重 / t','主钩额载 / t','本侧索具 / t','吊点至钩高差 / m','全段已核实可用钩高下限 / m（选填）']
 </script>
 <template>
 <main class="transfer"><div class="workflow">
@@ -163,9 +161,18 @@ const craneLabels=['平面禁入半径 / m','臂投影包络半宽 / m','主钩�
         </div></section>
         <div class="columns" :key="step">
           <div class="stack"><TransferPlot v-bind="scene" site :focus="step-1"/>
-            <section class="block"><h3>回转中心</h3><div class="pair">
-              <NumberEntry v-for="(_,k) in crane.center" :key="k" v-model="crane.center[k]" :label="'场地 '+'XY'[k]+' / m'" :attempted="attempted"/>
-            </div></section></div>
+            <section class="block"><h3>矩形占地包络</h3>
+              <div class="pair">
+                <NumberEntry v-model="crane.footprint_length" label="占地长 / m" :min=".000001" :attempted="attempted"/>
+                <NumberEntry v-model="crane.footprint_width" label="占地宽 / m" :min=".000001" :attempted="attempted"/>
+              </div>
+              <p class="muted">以回转中心为中心，长宽须覆盖车体及展开支腿。初始尺寸为示例。自动站位须复核场地边界及地基。</p>
+              <label><input type="checkbox" v-model="form.auto_stations"> 自动搜索两机站位（全程固定）</label>
+              <div v-if="!form.auto_stations" class="three">
+                <NumberEntry v-for="(_,k) in crane.center" :key="k" v-model="crane.center[k]" :label="'实测中心 '+'XY'[k]+' / m'" :attempted="attempted"/>
+                <NumberEntry v-model="crane.heading" label="长轴航向 / °" :attempted="attempted"/>
+              </div>
+            </section></div>
           <section class="block"><h3>作业包络与吊具</h3><div class="pair">
             <NumberEntry v-for="(key,k) in craneFields" :key="key" v-model="crane[key]" :label="craneLabels[k]" :min="key==='rigging'?0:.000001" :optional="key==='verified_height'" :attempted="attempted"/>
           </div></section>
@@ -173,34 +180,36 @@ const craneLabels=['平面禁入半径 / m','臂投影包络半宽 / m','主钩�
       </template>
       <template v-if="step===3">
         <div class="columns"><div class="stack">
-          <TransferPlot v-bind="scene" site preview/>
-          <p class="muted">两机禁入圆边界间距 {{gap.toFixed(2)}} m　·　车长 {{form.length}} m　·　车宽 {{form.width}} m</p>
+          <TransferPlot v-bind="scene" site :preview="!!result"/>
+          <p class="muted">根据起吊、落位、占地及障碍搜索中间姿态；规划完成后可慢速预演。</p>
           <section class="block"><h3>场地禁入圆</h3>
             <div v-for="(o,i) in form.obstacles" :key="i" class="obstacle"><div class="three"><NumberEntry v-for="(_,k) in o" :key="k" v-model="o[k]" :label="['X / m','Y / m','半径 / m'][k]" :min="k===2?.000001:undefined" :attempted="attempted"/></div><button type="button" @click="form.obstacles.splice(i,1)">移除障碍 {{i+1}}</button></div>
             <button type="button" @click="form.obstacles.push([0,0,1])">＋ 添加障碍</button>
           </section></div>
           <div class="stack">
-            <section v-for="(p,i) in scene.poses" :key="i" class="block"><h3>P{{i}} · {{i===0?'起吊位置':i===scene.poses.length-1?'对轨落位':'调姿位置'}}</h3><div class="three">
+            <section v-for="(p,i) in [form.start,form.end]" :key="i" class="block"><h3>{{i?'对轨落位':'起吊位置'}}</h3><div class="three">
               <NumberEntry v-for="(_,k) in p" :key="k" v-model="p[k]" :label="['中心 X / m','中心 Y / m','航向 / °'][k]" :attempted="attempted"/>
-            </div>
-            <div class="pose-tools">
-              <button v-if="i<scene.poses.length-1" type="button" :disabled="form.waypoints.length>=30" @click="insertPose(i)">在此后插入调姿点</button>
-              <button v-if="i>0 && i<=form.waypoints.length" type="button" @click="form.waypoints.splice(i-1,1)">移除此点</button>
             </div></section>
             <section class="block"><h3>转运条件</h3><div class="pair">
               <NumberEntry v-model="form.bottom" label="底面离地 / m" :min=".000001" :attempted="attempted"/>
               <NumberEntry v-model="form.factor" label="载荷放大系数" :min="1" :attempted="attempted"/>
               <NumberEntry v-model="form.gauge" label="目标轨距 / m" :min=".000001" :attempted="attempted"/>
-            </div><p class="muted">每段分别插值中心位置和航向；相邻点中心相同可表达原地调向。</p></section>
+            </div><p class="muted">按现场填写起止姿态；程序自动计算中间的平移与转角。</p></section>
           </div></div>
       </template>
       <p v-if="error" class="alert" role="alert">{{error}}</p>
       <div class="actions"><button v-if="step>0" type="button" :disabled="busy" @click="advance(step-1)">上一步</button>
-        <button class="primary" :disabled="busy || ((step===1 || step===2) && !models.length)">{{step===3?(busy?'正在校核…':'生成图纸并校核'):'下一步 →'}}</button>
+        <button class="primary" :disabled="busy || ((step===1 || step===2) && !models.length)">{{step===3?(busy?'正在搜索与校核…':'自动规划并校核'):'下一步 →'}}</button>
       </div>
     </form>
     <div v-else-if="result" class="transfer-output"><h2 tabindex="-1">图纸与校核</h2>
       <div class="decision" :data-status="verdict"><strong>{{ {fail:'存在超限或禁入区相交',pending:'存在待核区间',pass:'所列校核项全段满足'}[verdict] }}</strong><span>A / B 计算总吊重　{{result.loads.map(x=>x.toFixed(2)).join(' / ')}} t</span></div>
+      <p v-if="verdict!=='pass'" class="muted">以下为几何候选路径，仍有超限或待核项。</p>
+      <details class="block"><summary>自动规划的站位与调姿 · {{result.poses.length-1}} 段</summary>
+        <TransferPlot v-bind="scene" site preview/>
+        <p v-for="(c,i) in result.stations" :key="i">{{'AB'[i]}} 机中心 ({{c.center.map(x=>x.toFixed(2)).join(', ')}}) m · 长轴 {{c.heading.toFixed(1)}}°</p>
+        <p v-for="(p,i) in result.poses" :key="i">P{{i}}　({{p.slice(0,2).map(x=>x.toFixed(2)).join(', ')}}) m · {{p[2].toFixed(1)}}°</p>
+      </details>
       <div class="columns result-layout"><div class="block"><nav><button v-for="(t,i) in ['静力分析','俯视转向轨迹']" :class="{active:active===i}" :key="t" @click="active=i">{{t}}</button><button class="export" @click="save">导出 DXF</button></nav>
         <div class="paper"><button class="sheet-open" title="放大图纸" @click="viewer?.open()" v-html="result.drawings[active].svg"></button></div>
         <SheetViewer ref="viewer" :svg="result.drawings[active].svg"/></div>

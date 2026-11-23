@@ -5,7 +5,7 @@ import math
 from bisect import bisect_left
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from liftcalc.crane.capability import DUAL_LIMIT
 
@@ -25,7 +25,24 @@ class Crane(Inputs):
     boom: Positive
     center: XY
     boom_buffer: Positive
-    exclusion: Positive
+    footprint_length: Positive
+    footprint_width: Positive
+    heading: float = 0
+
+    @model_validator(mode="before")
+    @classmethod
+    def legacy_footprint(cls, data):
+        if isinstance(data, dict) and "exclusion" in data:
+            data = dict(data)
+            side = 2 * float(data.pop("exclusion"))
+            data.setdefault("footprint_length", side)
+            data.setdefault("footprint_width", side)
+        return data
+
+    @property
+    def box(self):
+        return Box(self.center, self.footprint_length, self.footprint_width, self.heading)
+
     hook: Positive
     hook_rating: Positive
     rigging: Nonnegative
@@ -34,6 +51,8 @@ class Crane(Inputs):
 
 
 class Transfer(Inputs):
+    auto_route: bool = False
+    auto_stations: bool = False
     length: Positive
     width: Positive
     height: Positive
@@ -48,6 +67,17 @@ class Transfer(Inputs):
     bottom: Positive
     factor: Annotated[float, Field(ge=1)]
     obstacles: list[tuple[float, float, Positive]] = Field(default_factory=list, max_length=100)
+
+    @model_validator(mode="before")
+    @classmethod
+    def unspecified_stations(cls, data):
+        if isinstance(data, dict) and data.get("auto_stations") is True:
+            # Only a search seed; no unchecked placeholder position is exported.
+            return {**data, "auto_route": True, "cranes": [
+                {"center": (0,0), **crane} if isinstance(crane,dict) else crane
+                for crane in data.get("cranes", ())
+            ]}
+        return data
 
     def shares(self):
         a, b = self.lugs
@@ -112,6 +142,44 @@ def segment_gap(a, b, c, d):
                point_segment(c,a,b), point_segment(d,a,b))
 
 
+class Box:
+    """Oriented footprint centered on the entered rotation center."""
+
+    def __init__(self, center, length, width, heading):
+        theta = math.radians(heading)
+        self.pose = (*center, math.cos(theta), math.sin(theta))
+        self.length, self.width = length, width
+        self.corners = tuple(world(self.pose, (x*length/2,y*width/2))
+                             for x,y in ((-1,-1),(1,-1),(1,1),(-1,1)))
+
+    def separation(self, pose, length, width):
+        # Maximum separating-axis gap is a conservative lower bound on distance.
+        x,y,c,s = pose
+        bx,by,u,v = self.pose
+        dx,dy = x-bx,y-by
+        co,si = abs(c*u+s*v),abs(s*u-c*v)
+        a,b = self.length/2,self.width/2
+        l,w = length/2,width/2
+        return max(abs(dx*u+dy*v)-a-l*co-w*si,
+                   abs(-dx*v+dy*u)-b-l*si-w*co,
+                   abs(dx*c+dy*s)-l-a*co-b*si,
+                   abs(-dx*s+dy*c)-w-a*si-b*co)
+
+    def segment_distance(self, a, b):
+        dx,dy = b[0]-a[0],b[1]-a[1]
+        length = math.hypot(dx,dy)
+        c,s = (dx/length,dy/length) if length else (1,0)
+        pose = ((a[0]+b[0])/2,(a[1]+b[1])/2,c,s)
+        if self.separation(pose,length,0) <= 0:
+            return 0
+        return min(segment_gap(a,b,self.corners[i-1],p) for i,p in enumerate(self.corners))
+
+    def distance(self, other):
+        if self.separation(other.pose,other.length,other.width)<=0:
+            return 0.0
+        return min(self.segment_distance(other.corners[i-1],p) for i,p in enumerate(other.corners))
+
+
 def route_intervals(case):
     route = case.route
     leg_count = len(route)-1
@@ -129,22 +197,33 @@ def route_intervals(case):
                    travel/count, turn/count, sweep/count)
 
 
-def analyze(case, repo):
+def analyze(case, repo, *, chart_cache=None):
     shares = case.shares()
-    disks = [(*c.center, c.exclusion) for c in case.cranes] + case.obstacles
+    boxes = [c.box for c in case.cranes]
+    stationary = []
+    if boxes[0].distance(boxes[1]) <= 0:
+        stationary.append("两机占地矩形相交")
+    for j,box in enumerate(boxes):
+        if any(clearance(box,box.pose,o)<=0 for o in case.obstacles):
+            stationary.append("AB"[j]+"机占地与场地障碍相交")
+    if chart_cache is None:
+        chart_cache = {}
     charts = []
     loads = []
     for crane, share in zip(case.cranes, shares):
-        rows = [r for r in repo.model_capacity(crane.brand, crane.model)
-                if r["config_name"] == crane.config and r["boom_len"] == crane.boom]
-        charts.append(sorted(rows, key=lambda r: r["radius"]))
+        key = (crane.brand, crane.model, crane.config, crane.boom)
+        if key not in chart_cache:
+            rows = [r for r in repo.model_capacity(crane.brand, crane.model)
+                    if r["config_name"] == crane.config and r["boom_len"] == crane.boom]
+            chart_cache[key] = sorted(rows, key=lambda r: r["radius"])
+        charts.append(chart_cache[key])
         loads.append((case.mass*share + crane.rigging)*case.factor + crane.hook)
 
     segments = []
     for leg, start, end, travel, turn, sweep in route_intervals(case):
         mid = (start+end)/2
         pose = case.pose(mid)
-        unsafe, unknown = [], []
+        unsafe, unknown = stationary.copy(), []
         ratios = []
         radius_bounds = []
         hooks = [world(pose, lug) for lug in case.lugs]
@@ -185,24 +264,27 @@ def analyze(case, repo):
                 chart_height = rows[k]["lift_height"]
             if max(chart_height or 0, crane.verified_height or 0) < required_h:
                 unknown.append(tag+"全段可用钩高待核")
-        for j, disk in enumerate(disks):
-            label = ("AB"[j]+"机" if j < 2 else f"障碍{j-1}")
-            gap = clearance(case, pose, disk)
-            if min(gap, clearance(case, case.pose(start), disk),
-                   clearance(case, case.pose(end), disk)) <= 0:
+        witnesses = (case.pose(start), pose, case.pose(end))
+        gaps = [("AB"[j]+"机", [box.separation(p,case.length,case.width) for p in witnesses])
+                for j,box in enumerate(boxes)]
+        gaps += [(f"障碍{j+1}", [clearance(case,p,disk) for p in witnesses])
+                 for j,disk in enumerate(case.obstacles)]
+        for label, distances in gaps:
+            if min(distances) <= 0:
                 unsafe.append(label+"禁入区相交")
-            elif gap <= sweep/2:
+            elif distances[1] <= sweep/2:
                 unknown.append(label+"区间净距待核")
-        # Moving endpoint bounds the displacement of the entire projected boom segment.
         for j, crane in enumerate(case.cranes):
             movement = (travel + turn*math.hypot(*case.lugs[j]))/2
-            for k, disk in enumerate(disks):
-                if k == j:
-                    continue
-                gap = point_segment(disk[:2], crane.center, hooks[j])-disk[2]-crane.boom_buffer
+            start_xy,end_xy = crane.center,hooks[j]
+            gaps = [("AB"[1-j]+"机",boxes[1-j].segment_distance(start_xy,end_xy))]
+            gaps += [(f"障碍{k+1}", point_segment(disk[:2],start_xy,end_xy)-disk[2])
+                     for k,disk in enumerate(case.obstacles)]
+            for label, dist in gaps:
+                gap = dist-crane.boom_buffer
                 if gap <= movement:
-                    tag = "AB"[j] + "臂平面包络与" + ("AB"[k]+"机" if k<2 else f"障碍{k-1}") + "禁区"
-                    (unsafe if gap <= 0 else unknown).append(tag+("相交" if gap <= 0 else "待核"))
+                    tag = "AB"[j]+"臂平面包络与"+label+"禁区"
+                    (unsafe if gap<=0 else unknown).append(tag+("相交" if gap<=0 else "待核"))
         c1,c2 = case.cranes
         gap = segment_gap(c1.center,hooks[0],c2.center,hooks[1])-c1.boom_buffer-c2.boom_buffer
         if gap <= (2*travel+turn*sum(math.hypot(*p) for p in case.lugs))/2:
@@ -210,3 +292,90 @@ def analyze(case, repo):
         segments.append(dict(leg=leg+1, start=start, end=end, ratios=ratios, radii=radius_bounds,
                              unsafe=unsafe, unknown=list(dict.fromkeys(unknown))))
     return dict(shares=shares, loads=loads, segments=segments)
+
+
+def candidate_stations(case, heading):
+    if not case.auto_stations:
+        yield case.cranes
+        return
+    # Sample stationary layouts along the transfer corridor. Dimensions include
+    # the outriggers; the footprint stays fixed throughout each candidate lift.
+    c,s = math.cos(heading),math.sin(heading)
+    normal = (-s,c)
+    a,b = [world(case.pose(0),lug) for lug in case.lugs]
+    sign = 1 if (b[0]-a[0])*normal[0]+(b[1]-a[1])*normal[1]>=0 else -1
+    for fraction in (.5,.35,.65):
+        mid = [case.start[i]+fraction*(case.end[i]-case.start[i]) for i in (0,1)]
+        for margin in (.35,1.5):
+            pair = []
+            for j,crane in enumerate(case.cranes):
+                offset = (case.width/2+crane.footprint_width/2+margin)*sign*(-1 if j==0 else 1)
+                xy = tuple(mid[i]+offset*normal[i] for i in (0,1))
+                pair.append(crane.model_copy(update={"center":xy,"heading":math.degrees(heading)}))
+            yield tuple(pair)
+
+
+def candidate_routes(case):
+    yield []
+    a,b = case.cranes
+    dx,dy = b.center[0]-a.center[0], b.center[1]-a.center[1]
+    sep = math.hypot(dx,dy)
+    if sep == 0:
+        return
+    nx,ny = dx/sep,dy/sep
+    ux,uy = ny,-nx
+    if ux*(case.end[0]-case.start[0])+uy*(case.end[1]-case.start[1])<0:
+        ux,uy = -ux,-uy
+    mid = tuple((x+y)/2 for x,y in zip(a.center,b.center))
+    angle = math.degrees(math.atan2(uy,ux))
+    angle += 180*round((case.start[2]-angle)/180)
+    # Search both end-first orientations, several lateral passages and staging
+    # distances. Never silently wrap the user's requested final heading.
+    for tilt in (0,180 if angle<case.start[2] else -180):
+        yaw = angle+tilt
+        for side in (0,-.22,.22):
+            gx,gy = mid[0]+side*sep*nx,mid[1]+side*sep*ny
+            for reach in (.65,1.05):
+                d = reach*case.length+max(cr.footprint_length for cr in case.cranes)/2
+                yield [(gx-ux*d,gy-uy*d,yaw),(gx,gy,yaw),(gx+ux*d,gy+uy*d,yaw)]
+
+
+def plan_transfer(case, repo):
+    """Bounded corridor search, with continuous interval checks on each finalist."""
+    if not (case.auto_route or case.auto_stations):
+        return case, analyze(case,repo)
+    case.shares()
+    heading = math.atan2(case.end[1]-case.start[1], case.end[0]-case.start[0])
+    best = None
+    chart_cache = {}
+    for pair in candidate_stations(case,heading):
+        layout = case.model_copy(update={"cranes":pair})
+        boxes = [cr.box for cr in pair]
+        if boxes[0].distance(boxes[1])<=0 or any(clearance(box,box.pose,o)<=0
+                for box in boxes for o in case.obstacles):
+            continue
+        for waypoints in candidate_routes(layout):
+            path = layout.model_copy(update={"waypoints":waypoints})
+            # Cheap collision rejection before evaluating the entire load chart.
+            samples = max(8,8*(len(waypoints)+1))
+            witness_poses = (path.pose(t/samples) for t in range(samples+1))
+            if any(any(box.separation(p,path.length,path.width)<=0 for box in boxes)
+                   or any(clearance(path,p,o)<=0 for o in path.obstacles)
+                   for p in witness_poses):
+                continue
+            result = analyze(path,repo,chart_cache=chart_cache)
+            segments = result["segments"]
+            issues = {msg for seg in segments for msg in seg["unsafe"]+seg["unknown"]}
+            if any(any(term in msg for term in ("相交","净距","禁区","交叠")) for msg in issues):
+                continue
+            overload = any(seg["unsafe"] for seg in segments)
+            outside = any("表域" in m or "表档" in m and "无" in m for m in issues)
+            peak = max((r for seg in segments for r in seg["ratios"] if r is not None),default=math.inf)
+            rank = (overload or outside, outside, overload, len(issues),peak,len(waypoints))
+            if best is None or rank < best[0]:
+                best = rank,path,result
+            if not issues:
+                return path,result
+    if best is None:
+        raise ValueError("在本次有限搜索范围内未找到通过平面连续避碰校核的路径。请核对起止位置、占地和可用场地。")
+    return best[1],best[2]
