@@ -63,7 +63,13 @@ class Repo:
         hooks = {}
         for hook in self.main_hooks():
             hooks.setdefault((hook["brand"], hook["model"]), []).append(hook)
+        lengths = {}
+        for row in self._rows("""SELECT DISTINCT m.brand, m.model, cfg.name, cfg.boom_len
+            FROM crane_config cfg JOIN crane_model m ON m.id=cfg.model_id
+            JOIN crane_capacity c ON c.config_id=cfg.id ORDER BY cfg.boom_len"""):
+            lengths.setdefault((row["brand"], row["model"], row["name"]), []).append(row["boom_len"])
         for model in models:
+            model["booms"] = lengths[(model["brand"], model["model"], model["config"])]
             model["main_hooks"] = hooks.get((model["brand"], model["model"]), [])
         return models
 

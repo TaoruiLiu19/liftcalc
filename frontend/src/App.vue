@@ -7,6 +7,8 @@ import {
   ref,
   watch,
 } from 'vue'
+import TransferPane from './TransferPane.vue'
+const mode = ref('single')
 import Load3D from './Load3D.vue'
 import SheetViewer from './SheetViewer.vue'
 import type { Snapshot, Model } from './types'
@@ -186,9 +188,11 @@ async function save(fmt: string) {
   <header>
     <b>Liftcalc</b><span class="divider"></span><span>吊装复核工作台</span
     ><small>● 本机离线</small>
+    <select class="mode-select" v-model="mode" aria-label="吊装方式"><option value="single">单机吊装</option><option value="dual">双机上轨</option></select>
     <select class="theme-select" aria-label="界面主题" v-model="theme"><option value="light">浅色</option><option value="dark">深色</option></select>
   </header>
-  <main>
+  <TransferPane v-if="mode === 'dual'" :models="models" />
+  <main v-show="mode === 'single'">
     <div class="workspace">
       <div class="inspector">
         <ol class="steps" aria-label="计算步骤">

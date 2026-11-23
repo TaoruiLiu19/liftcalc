@@ -1,5 +1,5 @@
 export type MainHook = { mass_t: number; rated_t: number; is_default: number }
-export type Model = { brand: string; model: string; config: string; hook_main_t: number | null; main_hooks: MainHook[] }
+export type Model = { brand: string; model: string; config: string; booms: number[]; hook_main_t: number | null; main_hooks: MainHook[] }
 export type Sling = {
   index: number
   name: string
@@ -52,7 +52,14 @@ export type Snapshot = {
     utilization: number | null
   }
 }
+export type TransferResult = {
+  drawings: { id: string; svg: string }[]
+  shares: number[]
+  loads: number[]
+  segments: { start: number; end: number; radii: [number, number][]; ratios: (number | null)[]; unsafe: string[]; unknown: string[] }[]
+}
 export interface Api {
+  calculate(input: { kind: 'rail.transfer'; transfer: unknown }): Promise<TransferResult>
   models(): Promise<Model[]>
   calculate(input: Record<string, unknown>): Promise<Snapshot>
   dxf(id: string): Promise<string>
