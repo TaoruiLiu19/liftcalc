@@ -45,7 +45,7 @@ $env:PYTHONPATH='src'
 $env:LIFTCALC_UI='browser'; .\.venv\Scripts\python.exe -m liftcalc.dusk   # 强制浏览器
 ```
 
-桌面顶栏可切换单机与双机上轨。CLI 的单工况双机分载使用 `--mode dual`。前端源码在 `frontend/src`，CAD 查看器及文字渲染 worker 的版本由 `frontend/pnpm-lock.yaml` 锁定。本次重建使用 Node.js 24.22.1 和 pnpm 11.22.0。
+桌面首页可选择单机吊装或双机上轨。「返回首页」可切换模式，并保留本次窗口内已填的工况。CLI 的单工况双机分载使用 `--mode dual`。前端源码在 `frontend/src`，CAD 查看器及文字渲染 worker 的版本由 `frontend/pnpm-lock.yaml` 锁定。本次重建使用 Node.js 24.22.1 和 pnpm 11.22.0。
 
 ## 一、它能回答什么问题
 
@@ -161,7 +161,9 @@ pip install pint numpy pydantic python-docx ezdxf typer PyYAML pytest hypothesis
 
 ### 桌面双机上轨
 
-顶栏选择「双机上轨」，依次填写吊物与吊点、A 机工况、B 机工况、转向与场地，最后进入图纸与校核。左侧步骤栏可返回已填步骤；修改工况后重新生成图纸。第一步可在吊物顶面点选 A、B 和重心 G，或直接输入坐标。G 的高度相对形心，两吊点位于顶面。两根竖直合力线维持水平平衡时，G 的投影必须落在 AB 线段内部。先生成静力图，再切换到俯视转向轨迹，两张均可放大和单独导出 DXF。
+[首页预览](docs/handover/assets/mode-home.png) · [吊点与重心编辑页](docs/handover/assets/transfer-points.png)
+
+首页选择「双机上轨」，依次填写吊物与吊点、A 机工况、B 机工况、转向与场地，最后进入图纸与校核。左侧步骤栏可返回已填步骤；修改工况后重新生成图纸。第一步在局部 XY 坐标图上选择吊点 A、B 或重心 G，再点击顶面定位，也可直接输入坐标。使用鼠标放置 G 时默认吸附至 AB 连线，可取消勾选。G 的高度相对形心，两吊点位于顶面。两根竖直合力线维持水平平衡时，G 的投影必须落在 AB 线段内部。先生成静力图，再切换到俯视转向轨迹，两张均可放大和单独导出 DXF。
 
 两机独立选择固定车型、配置和臂长，并填写回转中心、钩重与钩额载、索具及场地禁入圆。中心按直线移动，航向按输入的带符号角差转动，转运时保持给定底高。终点车体中心及航向定义目标轨道。轨距和站位按现场填写。
 

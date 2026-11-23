@@ -8,7 +8,8 @@ import {
   watch,
 } from 'vue'
 import TransferPane from './TransferPane.vue'
-const mode = ref('single')
+import ModeHome from './ModeHome.vue'
+const mode = ref<'home' | 'single' | 'dual'>('home')
 import Load3D from './Load3D.vue'
 import SheetViewer from './SheetViewer.vue'
 import type { Snapshot, Model } from './types'
@@ -20,6 +21,7 @@ const models = ref<Model[]>([]),
   snapshot = ref<Snapshot | null>(null),
   busy = ref(false),
   notice = ref(''),
+  noticeError = ref(false),
   tab = ref('sheet'),
   usedCad = ref(false),
   step = ref(1)
@@ -94,6 +96,7 @@ watch(
   () => {
     revision++
     snapshot.value = null
+    noticeError.value = false
     if (step.value === 2) notice.value = '输入已改变，请重新计算。'
   },
   { flush: 'sync' },
@@ -110,24 +113,29 @@ watch(
 )
 function goStep(next: number) {
   if (next === 2 && geometryIssue.value) {
+    noticeError.value = true
     notice.value = geometryIssue.value
     return
   }
+  noticeError.value = false
   notice.value = ''
   step.value = next
 }
 async function calculate() {
   const id = revision
   busy.value = true
+  noticeError.value = false
   notice.value = ''
   try {
     if (geometryIssue.value) {
+      noticeError.value = true
       notice.value = geometryIssue.value
       step.value = 1
       return
     }
     const mass = customHook.value ? form.hook : form.hookChoice
     if ((mass === '' && needsHookMass.value) || (mass !== '' && !(Number(mass) > 0))) {
+      noticeError.value = true
       notice.value = customHook.value ? '请按实车铭牌填写吊钩自重（吨）。' : '请选择实车主钩。'
       return
     }
@@ -157,6 +165,7 @@ async function calculate() {
       tab.value = 'sheet'
     }
   } catch (e) {
+    noticeError.value = true
     notice.value = String(e)
     snapshot.value = null
   } finally {
@@ -167,6 +176,7 @@ async function init() {
   try {
     models.value = await window.pywebview!.api.models()
   } catch (e) {
+    noticeError.value = true
     notice.value = String(e)
   }
 }
@@ -177,9 +187,11 @@ onMounted(() => {
 async function save(fmt: string) {
   if (!snapshot.value) return
   try {
+    noticeError.value = false
     if (await window.pywebview!.api.export(snapshot.value.id, fmt))
       notice.value = '已导出 ' + fmt.toUpperCase()
   } catch (e) {
+    noticeError.value = true
     notice.value = String(e)
   }
 }
@@ -188,9 +200,10 @@ async function save(fmt: string) {
   <header>
     <b>Liftcalc</b><span class="divider"></span><span>吊装复核工作台</span
     >
-    <select class="mode-select" v-model="mode" aria-label="吊装方式"><option value="single">单机吊装</option><option value="dual">双机上轨</option></select>
+    <div class="header-tools"><button v-if="mode!=='home'" @click="mode='home'">← 返回首页</button></div>
     <select class="theme-select" aria-label="界面主题" v-model="theme"><option value="light">浅色</option><option value="dark">深色</option></select>
   </header>
+  <ModeHome v-if="mode==='home'" @choose="mode=$event" />
   <KeepAlive><TransferPane v-if="mode === 'dual'" :models="models" /></KeepAlive>
   <main v-show="mode === 'single'">
     <div class="workspace">
@@ -383,7 +396,7 @@ async function save(fmt: string) {
           :inset="+form.lugInset || 0"
           :weight="+form.payload || 0"
         />
-        <p v-else-if="!showResult" class="hint" role="status">{{ geometryIssue }}</p>
+        <p v-else-if="!showResult" class="hint single-error" role="alert">{{ geometryIssue }}</p>
         <CadPane v-if="usedCad && showResult && snapshot" v-show="tab === 'cad'" :snapshot="snapshot" />
         <div v-if="!showResult || tab === 'sheet'" class="caption">
           {{ showResult && tab === 'sheet'
@@ -392,7 +405,7 @@ async function save(fmt: string) {
         </div>
       </section>
     </div>
-    <p role="status" v-if="notice">{{ notice }}</p>
+    <p :role="noticeError ? 'alert' : 'status'" :class="{'single-error':noticeError}" v-if="notice">{{ notice }}</p>
     <footer>用于专业复核，不作为工程实施依据。</footer>
     <SheetViewer v-if="snapshot?.svg" ref="sheetViewer" :svg="snapshot.svg" />
   </main>
