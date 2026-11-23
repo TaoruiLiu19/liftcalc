@@ -1,10 +1,12 @@
 import json
+import math
 from pathlib import Path
 
 import ezdxf
 import pytest
 
-from liftcalc.crane.transfer import Box, Transfer, analyze, clearance, plan_transfer, segment_gap
+from liftcalc.crane.transfer import (Box, Transfer, analyze, clearance, interpolate_hook,
+                                     plan_transfer, segment_gap, world)
 from liftcalc.data.repo import Repo
 from liftcalc.dusk import DesktopApi
 
@@ -43,13 +45,16 @@ def test_mid_transfer_collision_and_exports(data, tmp_path):
     assert any("A全段可用钩高待核" in s["unknown"] for s in segments)
     assert segments[0]["start"] == 0 and segments[-1]["end"] == 1
     assert all(a["end"] == b["start"] for a,b in zip(segments,segments[1:]))
-    for drawing in result["drawings"]:
+    for index,drawing in enumerate(result["drawings"]):
         payload, name = api.render(drawing["id"], "dxf")
         path = tmp_path/name
         path.write_bytes(payload)
         doc = ezdxf.readfile(path)
         texts = [t.dxf.text for t in doc.modelspace().query("TEXT")]
         assert not any(word in t for t in texts for word in ("区间", "负荷率", "计算", "超限"))
+        if index == 0:
+            assert {"AG  6.00","BG  4.00","AB  10.00","A 钩高 6.00","B 钩高 6.00",
+                    "车底离地  1.00 m","L  12.00","B=3.00","点位坐标 / m"} <= set(texts)
         assert doc.header["$INSUNITS"] == 4 and len(doc.modelspace().query("TEXT")) >= 6
 
 
@@ -99,6 +104,11 @@ def test_plan_without_stations_or_waypoints():
     result = DesktopApi(Repo(ROOT/"data/liftcalc.sqlite")).calculate(data)
     assert result["poses"][0] == case.start and result["poses"][-1] == case.end
     assert len(result["poses"]) > 2 and result["stations"][0] != result["stations"][1]
+    mid = len(result["poses"])//2
+    # The demo turns and translates through the throat, with different hook paths.
+    inbound, throat, outbound = result["poses"][mid-1:mid+2]
+    assert abs(throat[2]) > .1 and abs(inbound[2]-throat[2]) > .01
+    assert math.dist(inbound[:2],outbound[:2]) > 0
     assert not any("相交" in m or "净距" in m for s in result["segments"] for m in s["unsafe"]+s["unknown"])
     assert any(s["unsafe"] for s in result["segments"])  # demo overload must remain visible
 
@@ -121,3 +131,18 @@ def test_legacy_exclusion_becomes_enclosing_square(data):
         cr["exclusion"] = 3
     case = Transfer.model_validate(data["transfer"])
     assert case.cranes[0].footprint_length == case.cranes[0].footprint_width == 6
+
+def test_master_hook_crosses_bearing_wrap_without_full_turn(data):
+    case = Transfer.model_validate(data["transfer"])
+    crane = case.cranes[0]
+    lug = case.lugs[0]
+    def body_pose(radius,azimuth,yaw):
+        angle = math.radians(azimuth)
+        rad = math.radians(yaw)
+        dx,dy = world((0,0,math.cos(rad),math.sin(rad)),lug)
+        return (crane.center[0]+radius*math.cos(angle)-dx,
+                crane.center[1]+radius*math.sin(angle)-dy,yaw)
+    start,end = body_pose(8,175,38),body_pose(12,-175,15)
+    mid = interpolate_hook(crane,lug,start,end,.5)
+    assert mid == pytest.approx(body_pose(10,180,26.5))
+    assert interpolate_hook(crane,lug,start,end,1) == pytest.approx(end)

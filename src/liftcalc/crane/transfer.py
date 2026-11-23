@@ -315,6 +315,24 @@ def candidate_stations(case, heading):
             yield tuple(pair)
 
 
+def interpolate_hook(crane, lug, start, end, t):
+    """Interpolate master-hook radius and unwrapped slew, then recover the body centre."""
+    def polar(pose):
+        angle = math.radians(pose[2])
+        x,y = world((*pose[:2],math.cos(angle),math.sin(angle)),lug)
+        dx,dy = x-crane.center[0],y-crane.center[1]
+        return math.hypot(dx,dy),math.atan2(dy,dx)
+    r0,a0 = polar(start)
+    r1,a1 = polar(end)
+    radius = r0 + t*(r1-r0)
+    azimuth = a0 + t*math.remainder(a1-a0,2*math.pi)
+    yaw = start[2] + t*(end[2]-start[2])
+    rad = math.radians(yaw)
+    ox,oy = world((0,0,math.cos(rad),math.sin(rad)),lug)
+    return (crane.center[0]+radius*math.cos(azimuth)-ox,
+            crane.center[1]+radius*math.sin(azimuth)-oy, yaw)
+
+
 def candidate_routes(case):
     yield []
     a,b = case.cranes
@@ -329,15 +347,74 @@ def candidate_routes(case):
     mid = tuple((x+y)/2 for x,y in zip(a.center,b.center))
     angle = math.degrees(math.atan2(uy,ux))
     angle += 180*round((case.start[2]-angle)/180)
-    # Search both end-first orientations, several lateral passages and staging
-    # distances. Never silently wrap the user's requested final heading.
-    for tilt in (0,180 if angle<case.start[2] else -180):
-        yaw = angle+tilt
-        for side in (0,-.22,.22):
-            gx,gy = mid[0]+side*sep*nx,mid[1]+side*sep*ny
-            for reach in (.65,1.05):
-                d = reach*case.length+max(cr.footprint_length for cr in case.cranes)/2
-                yield [(gx-ux*d,gy-uy*d,yaw),(gx,gy,yaw),(gx+ux*d,gy+uy*d,yaw)]
+    boxes = [cr.box for cr in case.cranes]
+    # Width of the passage along the line of centres, accounting for headings.
+    def normal_projection(p):
+        return (p[0]-mid[0])*nx + (p[1]-mid[1])*ny
+    lower = max(map(normal_projection, boxes[0].corners))
+    upper = min(map(normal_projection, boxes[1].corners))
+    room = upper-lower-case.width
+    if room <= 0:
+        return
+    gate = (lower+upper)/2
+    depth = max(abs((x-mid[0])*ux+(y-mid[1])*uy) for box in boxes for x,y in box.corners)
+    reach = depth + math.hypot(case.length,case.width)/2 + 0.35
+    # A yaw allowance from the transverse projection of a rigid vehicle.
+    slack_angle = math.degrees(math.asin(min(1,room/case.length)))
+    def point(along, across, yaw):
+        return (mid[0]+along*ux+across*nx,mid[1]+along*uy+across*ny,yaw)
+
+    def blend(a,b,t):
+        return tuple(x+t*(y-x) for x,y in zip(a,b))
+
+    for axis in (angle, angle+(180 if angle<case.start[2] else -180)):
+        for direction in (1,-1):
+            for fraction in (.65,.28):
+                skew = direction*min(32,slack_angle*fraction)
+                bend = direction*min(room*.13,case.width/2)
+                entry = point(-reach,gate-bend,axis+skew)
+                exit_pose = point(reach,gate+bend,axis+skew)
+                throat = []
+                for j in range(1,9):
+                    t = j/8
+                    across = gate + bend*(2*t-1 + .55*math.sin(2*math.pi*t))
+                    throat.append(point(reach*(2*t-1),across,
+                                        axis+skew*(1-.65*math.sin(math.pi*t))))
+                # Try either master hook on approach, exchanging roles at the exit.
+                # The other hook follows the rigid body. All chords are rechecked.
+                for master in (0,1):
+                    approach = [interpolate_hook(case.cranes[master],case.lugs[master],
+                                                 case.start,entry,j/6) for j in range(1,7)]
+                    other = 1-master
+                    departing = [interpolate_hook(case.cranes[other],case.lugs[other],
+                                                  exit_pose,case.end,j/6) for j in range(1,6)]
+                    yield approach + throat + departing
+
+                def swing(start,end,sign,steps):
+                    pivot = point(sign*(reach+case.width*.5),gate,(start[2]+end[2])/2)
+                    return [blend(blend(start,pivot,t),blend(pivot,end,t),t) for t in steps]
+                yield (swing(case.start,entry,-1,[j/6 for j in range(1,7)]) + throat
+                       + swing(exit_pose,case.end,1,[j/6 for j in range(1,6)]))
+
+
+def hook_motion_cost(case):
+    """Planar actuator travel equivalent: radial change and arc travel at each hook."""
+    total = 0.0
+    previous = None
+    steps = 4*(len(case.route)-1)
+    for i in range(steps+1):
+        pose = case.pose(i/steps)
+        current = []
+        for crane,lug in zip(case.cranes,case.lugs):
+            x,y = world(pose,lug)
+            dx,dy = x-crane.center[0],y-crane.center[1]
+            current.append((math.hypot(dx,dy),math.atan2(dy,dx)))
+        if previous is not None:
+            for (r,a),(s,b) in zip(previous,current):
+                slew = abs(math.remainder(b-a,2*math.pi))
+                total += abs(s-r) + (r+s)/2*slew
+        previous = current
+    return total
 
 
 def plan_transfer(case, repo):
@@ -371,11 +448,9 @@ def plan_transfer(case, repo):
             overload = any(seg["unsafe"] for seg in segments)
             outside = any("表域" in m or "表档" in m and "无" in m for m in issues)
             peak = max((r for seg in segments for r in seg["ratios"] if r is not None),default=math.inf)
-            rank = (overload or outside, outside, overload, len(issues),peak,len(waypoints))
+            rank = (overload or outside, outside, overload, len(issues),peak,hook_motion_cost(path))
             if best is None or rank < best[0]:
                 best = rank,path,result
-            if not issues:
-                return path,result
     if best is None:
         raise ValueError("在本次有限搜索范围内未找到通过平面连续避碰校核的路径。请核对起止位置、占地和可用场地。")
     return best[1],best[2]

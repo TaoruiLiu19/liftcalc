@@ -87,10 +87,24 @@ function place(x:number,y:number){
   }
   p[0]=x; p[1]=y
 }
+// Before planning, show the footprint at a provisional corridor station.
+const previewStations = computed(() => {
+  if (!form.auto_stations) return form.cranes
+  const [ax,ay,yaw] = form.start, [bx,by] = form.end
+  const heading = Math.atan2(by-ay,bx-ax), nx = -Math.sin(heading), ny = Math.cos(heading)
+  const angle = yaw*Math.PI/180-heading
+  const [[x1,y1],[x2,y2]] = form.lugs
+  const sign = (x2-x1)*Math.sin(angle)+(y2-y1)*Math.cos(angle)>=0 ? 1 : -1
+  return form.cranes.map((c,i) => {
+    const offset = (form.width/2+c.footprint_width/2+.35)*sign*(i===0?-1:1)
+    return {...c,center:[(ax+bx)/2+offset*nx,(ay+by)/2+offset*ny],heading:heading*180/Math.PI}
+  })
+})
 const scene=computed(()=>({
   length:form.length,width:form.width,points:points.value,pick:pick.value,gauge:form.gauge,
   cranes:result.value ? form.cranes.map((c,i)=>({...c,...result.value!.stations[i]}))
-    : form.auto_stations ? [] : form.cranes,
+    : previewStations.value,
+  provisional:form.auto_stations && !result.value,
   poses:result.value?.poses ?? [form.start,form.end],obstacles:form.obstacles,
 }))
 const runs=computed(()=>{
@@ -116,9 +130,14 @@ async function calculate() {
   } catch(e){if(id===revision) error.value=String(e)}
   finally {busy.value=false}
 }
-async function save(){
+async function openSheet(i:number){
+  active.value=i
+  await nextTick()
+  viewer.value?.open()
+}
+async function save(i:number){
   if(!result.value) return
-  try {await window.pywebview!.api.export(result.value.drawings[active.value].id,'dxf')}
+  try {await window.pywebview!.api.export(result.value.drawings[i].id,'dxf')}
   catch(e){error.value=String(e)}
 }
 const sizeFields = {length:'长 / m', width:'宽 / m', height:'高 / m', mass:'质量 / t'} as const
@@ -205,14 +224,19 @@ const craneLabels=['臂投影包络半宽 / m','主钩自重 / t','主钩额载 
     <div v-else-if="result" class="transfer-output"><h2 tabindex="-1">图纸与校核</h2>
       <div class="decision" :data-status="verdict"><strong>{{ {fail:'存在超限或禁入区相交',pending:'存在待核区间',pass:'所列校核项全段满足'}[verdict] }}</strong><span>A / B 计算总吊重　{{result.loads.map(x=>x.toFixed(2)).join(' / ')}} t</span></div>
       <p v-if="verdict!=='pass'" class="muted">以下为几何候选路径，仍有超限或待核项。</p>
+      <div class="sheets">
+        <section v-for="(d,i) in result.drawings" :key="d.id" class="block">
+          <header><h3>{{i===0?'静力分析':'俯视转向轨迹'}}</h3><button @click="save(i)">导出 DXF</button></header>
+          <div class="paper"><button class="sheet-open" :aria-label="i===0?'放大静力分析图':'放大轨迹图'" @click="openSheet(i)" v-html="d.svg"></button></div>
+        </section>
+      </div>
+      <SheetViewer ref="viewer" :svg="result.drawings[active].svg"/>
+      <div class="columns result-layout">
       <details class="block"><summary>自动规划的站位与调姿 · {{result.poses.length-1}} 段</summary>
         <TransferPlot v-bind="scene" site preview/>
         <p v-for="(c,i) in result.stations" :key="i">{{'AB'[i]}} 机中心 ({{c.center.map(x=>x.toFixed(2)).join(', ')}}) m · 长轴 {{c.heading.toFixed(1)}}°</p>
         <p v-for="(p,i) in result.poses" :key="i">P{{i}}　({{p.slice(0,2).map(x=>x.toFixed(2)).join(', ')}}) m · {{p[2].toFixed(1)}}°</p>
       </details>
-      <div class="columns result-layout"><div class="block"><nav><button v-for="(t,i) in ['静力分析','俯视转向轨迹']" :class="{active:active===i}" :key="t" @click="active=i">{{t}}</button><button class="export" @click="save">导出 DXF</button></nav>
-        <div class="paper"><button class="sheet-open" title="放大图纸" @click="viewer?.open()" v-html="result.drawings[active].svg"></button></div>
-        <SheetViewer ref="viewer" :svg="result.drawings[active].svg"/></div>
         <div class="stack"><section v-for="(_,i) in form.cranes" :key="i" class="block"><h3>{{'AB'[i]}} 机校核</h3>
           <p>幅度包络　{{Math.min(...result.segments.map(s=>s.radii[i][0])).toFixed(2)}}–{{Math.max(...result.segments.map(s=>s.radii[i][1])).toFixed(2)}} m</p>
           <p>已覆盖档最高负荷率　{{result.segments.some(s=>s.ratios[i]!==null)?(100*Math.max(...result.segments.map(s=>s.ratios[i]??0))).toFixed(1)+'%':'无数据'}}</p></section>
@@ -241,7 +265,7 @@ h3{font-size:15px;margin:0 0 10px}.block{padding:15px;border-radius:12px;border:
 .workflow-panel :deep(input[aria-invalid=true]){outline-color:var(--danger);border:1.5px solid var(--danger);background:var(--danger-bg)}:deep(.field-error){display:block;font-size:12px}
 .point-editor.invalid{border-color:var(--danger)}
 .decision{justify-content:space-between;background:var(--wash);flex-wrap:wrap}.decision[data-status=pending],[data-status=pending]{color:var(--warm)}
-.export{margin-left:auto}.result-layout{grid-template-columns:minmax(0,1.7fr) minmax(230px,1fr)}.paper{height:clamp(250px,49vh,580px);margin-top:12px}
+.sheets{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,350px),1fr));gap:12px;margin-top:12px}.sheets .block{padding:10px}.sheets header{display:flex;align-items:center;justify-content:space-between}.sheets h3{margin:0}.sheets .paper{height:auto;aspect-ratio:420/297;padding:2px}.sheets .sheet-open{display:block}.result-layout{grid-template-columns:minmax(0,1.7fr) minmax(230px,1fr)}.paper{height:clamp(250px,49vh,580px);margin-top:12px}
 .pose-tools{display:flex;gap:8px;margin-top:8px}.obstacle{padding-bottom:12px}.transfer-output nav{flex-wrap:wrap}.muted{color:var(--quiet)}
 @media(max-width:920px){.columns{grid-template-columns:1fr}.four{grid-template-columns:1fr 1fr}}
 @media(max-width:680px){.workflow{display:flex;flex-direction:column;gap:8px}.workflow-nav{width:100%}.workflow-nav h2{display:none}.steps{flex-direction:row;flex-wrap:wrap}.steps li{flex:auto}}
