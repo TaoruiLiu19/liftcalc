@@ -5,10 +5,12 @@ from pathlib import Path
 
 import pytest
 
+from liftcalc.core.units import Q
 from liftcalc.crane.transfer import Transfer
 from liftcalc.data.repo import Repo
 from liftcalc.dusk import DesktopApi
 from liftcalc.lifting.load_geometry import LoadShape, sling_report
+from liftcalc.lifting.rigging import SlingArrangement, branch_force
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -85,3 +87,91 @@ def test_qy70_exact_chart_boundary(api, rotation, mass, gross, fails):
     assert segment["ratios"] == pytest.approx([gross/15.5]*2)
     assert set(segment["unsafe"]) == ({"A表档负荷率超限","B表档负荷率超限"} if fails else set())
     assert not segment["unknown"]
+
+
+@pytest.mark.parametrize("horizontal_deg,expected_lbf", [(90, 500), (60, 577), (45, 707), (30, 1000)])
+def test_tr244c_figure_47_sling_tension(horizontal_deg, expected_lbf):
+    arrangement = SlingArrangement(branches=2, angle_deg=90 - horizontal_deg)
+    tension = branch_force(Q(1000, "lbf"), arrangement)
+    assert tension.to("lbf").magnitude == pytest.approx(expected_lbf, abs=0.5)
+
+
+@pytest.mark.parametrize("cg_from_left_ft,near_bounds,far_bounds", [
+    (2, (2400, 4000), (0, 1600)),  # ITI Fig. 2 percentages, scaled to 8000 lbf
+    (3, (1600, 4000), (0, 2400)),  # ITI Fig. 3, published absolute forces
+])
+def test_iti_eccentric_pick_point_bounds(cg_from_left_ft, near_bounds, far_bounds):
+    ft = 0.3048
+    shape = LoadShape(length=10*ft, width=4*ft, height=1, cg_x=(cg_from_left_ft-5)*ft,
+                      sling_height=2)
+    report = sling_report(shape, weight_t=Q(8000, "lb").to("metric_ton").magnitude)
+    # Fig. 2/3 top view: A and B are on the left. Compare vertical reactions.
+    expected = {(-1, 1): near_bounds, (-1, -1): near_bounds,
+                (1, -1): far_bounds, (1, 1): far_bounds}
+    actual = {}
+    for leg in report.slings:
+        run = math.hypot(leg.x - shape.cg_x, leg.y - shape.cg_y)
+        vertical_factor = shape.sling_height / math.hypot(shape.sling_height, run)
+        corner = (math.copysign(1, leg.x), math.copysign(1, leg.y))
+        actual[corner] = tuple(Q(t * vertical_factor, "kN").to("lbf").magnitude
+                               for t in (leg.equilibrium_min_kn, leg.equilibrium_max_kn))
+    assert actual.keys() == expected.keys()
+    for corner, bounds in expected.items():
+        assert actual[corner] == pytest.approx(bounds)
+
+
+# Transcribed from SANY STC1100T7, printed p. 10. Blank cells are omitted.
+SANY_10_M = {13.9: 36, 18.5: 36, 23: 36.9, 27.6: 36.2, 32.1: 36.9,
+             36.7: 39, 41.2: 37.5, 45.7: 26.8, 50.3: 24.9}
+SANY_12_M = {18.5: 29.3, 23: 30, 27.6: 29.8, 32.1: 30.2, 36.7: 32,
+             41.2: 32.3, 45.7: 22.7, 50.3: 21.1, 54.9: 19}
+
+
+@pytest.mark.parametrize("radius,chart_radius,ratings,status", [
+    (10, 10, SANY_10_M, "满足"),
+    # 54.9 m boom coverage starts at 12 m, outside the requested radius.
+    (10.01, 12, {boom: load for boom, load in SANY_12_M.items() if boom != 54.9}, "不满足"),
+    (12, 12, SANY_12_M, "不满足"),
+    (64.01, None, {}, "资料不足"),
+])
+def test_sany_published_rows_and_single_crane_verdict(api, radius, chart_radius, ratings, status):
+    case = {"kind": "crane.capability", "crane": {"brand": "三一", "model": "STC1100T7"},
+            "target_radius": radius, "payload": 33.265, "hook_mass": 0.735}
+    cap = api.calculate(case)["cap"]
+    assert cap["required"] == pytest.approx(34)
+    assert cap["limit"] == 0.9
+    assert cap["status"] == status
+    assert cap["ok"] == (status == "满足")
+    rows = cap["records"]
+    assert len(rows) == len(ratings)
+    assert {row["boom_len"]: row["rated_load"] for row in rows} == ratings
+    assert all(row["radius"] == chart_radius for row in rows)
+    if status == "满足":
+        assert (cap["boom_len"], cap["rated_load"]) == (36.7, 39)
+        assert cap["utilization"] == pytest.approx(34 / 39)
+    elif status == "不满足":
+        assert cap["closest_utilization"] == pytest.approx(34 / 32.3)
+
+
+def test_dual_rotation_crosses_sany_chart_step(api, rotation):
+    case = rotation["transfer"]
+    case.update(mass=50, start=[0, 0, 60], end=[0, 0, 120], obstacles=[])
+    for crane, center in zip(case["cranes"], ([-7, -6], [0, -8.1])):
+        crane.update(brand="三一", model="STC1100T7", boom=36.7, center=center,
+                     config="全配重38.5t·支腿全伸7.3×8.1m·侧方及后方·主臂36.7m", hook=0.735, hook_rating=75)
+    result = api.calculate(rotation)
+    assert result["loads"] == pytest.approx([28.565, 28.565])
+    # B's lug starts and ends below 10 m, reaching 10.1 m at 90 degrees.
+    # The 10/12 m ratings for this specific boom are 39/32 t on printed p. 10.
+    segments = result["segments"]
+    middle = [s for s in segments if s["start"] <= 0.5 <= s["end"]]
+    assert middle
+    for segment in (segments[0], segments[-1]):
+        assert segment["radii"][1][1] < 10
+        assert segment["ratios"][1] == pytest.approx(28.565 / 39)
+        assert "B表档负荷率超限" not in segment["unsafe"]
+    for segment in middle:
+        low, high = segment["radii"][1]
+        assert low <= 10.1 <= high
+        assert segment["ratios"][1] == pytest.approx(28.565 / 32)
+        assert "B表档负荷率超限" in segment["unsafe"]
