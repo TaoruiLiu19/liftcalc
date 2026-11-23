@@ -30,10 +30,7 @@ header b {
   height: 18px;
   border-left: 1px solid #5a5b69;
 }
-header small {
-  margin-left: auto;
-  color: #adc6b9;
-}
+header .mode-select { margin-left: auto; }
 #app {
   display: flex;
   flex-direction: column;
@@ -287,7 +284,7 @@ select:focus-visible {
   background: #ffffff; border-color: #cddadb; border-radius: 16px;
   box-shadow: 4px 12px 25px -18px #477b8b;
 }
-[data-theme="light"] :is(.muted,footer,.caption,dt,header small) { color: #4c6570; }
+[data-theme="light"] :is(.muted,footer,.caption,dt) { color: #4c6570; }
 [data-theme="light"] :is(summary,label) { color: #314f5e; }
 [data-theme="light"] :is(select,input:not([type=checkbox]),button) { background: #fafcfb; color: #203f4e; border-color: #aec3c8; }
 [data-theme="light"] :is(button.active,button:hover:not(:disabled)) { color: #133e55; background: #e1eff1; border-color: #50829a; }
