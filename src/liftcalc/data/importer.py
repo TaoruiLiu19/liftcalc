@@ -187,6 +187,9 @@ def build_db(pack_dir: Path, out_path: Path, data_version: str) -> BuildStats:
                         source_doc = meta_row.get("source_doc") or ""
                         if source_doc.startswith("https://") and row.source_page.isdecimal():
                             source_ref = f"{source_doc}#page={row.source_page}"
+                        if "回增系原表真实值" in row.note:
+                            # 原厂小幅度段平台：逐条核对过，标记后数据库校验放行
+                            source_ref += "（回增系原表真实值，已核对）"
                         conn.execute(
                             "INSERT INTO crane_capacity (config_id, radius, rated_load, boom_angle_deg,"
                             " lift_height_m, parts_of_line, source_ref) VALUES (?,?,?,?,?,?,?)",

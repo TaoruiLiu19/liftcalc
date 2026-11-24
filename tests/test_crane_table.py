@@ -43,6 +43,16 @@ def test_rated_load_must_not_increase() -> None:
     assert any("回增" in issue for issue in report.errors)
 
 
+def test_documented_source_rebound_is_warning_only() -> None:
+    """小幅度段平台回增，note 标明"回增系原表真实值"且已逐条核对，不算错表。"""
+    rows = _rows((11.6, 3.0, 70.0), (11.6, 4.0, 54.0))
+    rows.append(CapacityRow(11.6, 5.0, 54.5,
+                            note="三一原厂表；5m 处 0.5t 级回增系原表真实值"))
+    report = validate_capacity("X", rows)
+    assert report.ok, report.errors
+    assert any("原表真实值" in issue for issue in report.warnings)
+
+
 def test_rated_load_over_tonnage_is_error() -> None:
     rows = _rows((11.6, 3.0, 80.0), (11.6, 4.0, 54.0))
     report = validate_capacity("X", rows, tonnage_class=70.0)

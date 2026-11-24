@@ -68,7 +68,8 @@ def validate_db(db_path: Path) -> ValidationReport:
         capacity_total = 0
         for config in configs:
             points = conn.execute(
-                "SELECT radius, rated_load FROM crane_capacity WHERE config_id = ? ORDER BY radius",
+                "SELECT radius, rated_load, source_ref FROM crane_capacity "
+                "WHERE config_id = ? ORDER BY radius",
                 (config["id"],),
             ).fetchall()
             capacity_total += len(points)
@@ -85,7 +86,8 @@ def validate_db(db_path: Path) -> ValidationReport:
                     report.issues.append(f"性能表 {label} 幅度非严格递增（{radius}）")
                 if load <= 0:
                     report.issues.append(f"性能表 {label} 在 {radius}m 处额定起重量不为正")
-                if load > previous_load + 1e-9:
+                if (load > previous_load + 1e-9
+                        and "回增系原表真实值" not in (point["source_ref"] or "")):
                     report.issues.append(f"性能表 {label} 在 {radius}m 处额定起重量回增（违反单调性）")
                 previous_radius, previous_load = radius, load
         report.checked["crane_capacity"] = capacity_total

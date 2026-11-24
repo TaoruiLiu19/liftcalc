@@ -171,9 +171,13 @@ def validate_capacity(
             if row.radius <= previous_radius + TOL:
                 report.errors.append(f"{label}：幅度未严格递增（{row.radius:g}）")
             if row.rated_load > previous_load + TOL:
-                report.errors.append(
-                    f"{label}：幅度 {row.radius:g} m 处额定值回增（{row.rated_load:g} > {previous_load:g}）"
-                )
+                rebound = (f"{label}：幅度 {row.radius:g} m 处额定值回增"
+                           f"（{row.rated_load:g} > {previous_load:g}）")
+                if "回增系原表真实值" in row.note:
+                    # 小幅度段平台：逐条对照原厂表核过，note 明确标注，降级为提醒
+                    report.warnings.append(rebound + "，原表真实值（已标注）")
+                else:
+                    report.errors.append(rebound)
             if row.boom_angle is not None and row.boom_angle > previous_angle + 0.6:
                 report.warnings.append(
                     f"{label}：幅度 {row.radius:g} m 处仰角不降反升（{row.boom_angle:g}°）"

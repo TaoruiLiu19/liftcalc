@@ -52,9 +52,10 @@ def _case(model: str, **overrides: object) -> dict[str, object]:
 
 
 def test_model_without_table_is_refused(repo: Repo) -> None:
-    """未录入性能表的机型必须明确报错，不能返回半截答案。"""
+    """未录入性能表的机型必须明确报错，不能返回半截答案。
+    QAY300 已有表，改用库中不存在的 QAY999。"""
     with pytest.raises(LiftcalcError):
-        run_case(_case("QAY300"), repo)
+        run_case(_case("QAY999"), repo)
 
 
 def test_full_counterweight_chart_cells_keep_units_and_extension_codes(repo: Repo) -> None:
