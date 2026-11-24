@@ -84,7 +84,7 @@ const model = computed(() => {
   const slings = lugs.map((lug) => ({ a: hook, b: at(lug), lug: at(lug) }))
   const axes = [
     { a: origin, b: at({ x: axis, y: 0, z: 0 }), label: 'x（长度，远离吊车）', tag: 'x', dx: 6, dy: 4, anchor: 'start' },
-    { a: origin, b: at({ x: 0, y: axis, z: 0 }), label: `y（宽度 B=${B.toFixed(2)}）`, tag: 'y', dx: -6, dy: -6, anchor: 'end' },
+    { a: origin, b: at({ x: 0, y: axis, z: 0 }), label: `y（宽度 B=${B.toFixed(2)} m）`, tag: 'y', dx: -6, dy: -6, anchor: 'end' },
     { a: origin, b: at({ x: 0, y: 0, z: axisZ }), label: 'z（竖向）', tag: 'z', dx: 6, dy: 4, anchor: 'start' },
   ]
 
@@ -129,8 +129,8 @@ const model = computed(() => {
           :class="{ hidden: edge.hidden }"
         />
       </g>
-      <line class="plumb" :x1="model.hook.x" :y1="model.hook.y" :x2="model.cg.x" :y2="model.cg.y" />
-      <g class="sling">
+      <line v-if="slingHeight>0" class="plumb" :x1="model.hook.x" :y1="model.hook.y" :x2="model.cg.x" :y2="model.cg.y" />
+      <g v-if="slingHeight>0" class="sling">
         <line v-for="(sling, index) in model.slings" :key="index" :x1="sling.a.x" :y1="sling.a.y" :x2="sling.b.x" :y2="sling.b.y" />
         <circle v-for="(sling, index) in model.slings" :key="`lug-${index}`" :cx="sling.lug.x" :cy="sling.lug.y" r="4" />
         <circle :cx="model.hook.x" :cy="model.hook.y" r="7" class="hook" />

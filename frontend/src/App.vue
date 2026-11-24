@@ -10,6 +10,8 @@ import {
 import TransferPane from './TransferPane.vue'
 import ModeHome from './ModeHome.vue'
 const mode = ref<'home' | 'single' | 'dual'>('home')
+import RiggingHeight from './RiggingHeight.vue'
+import { riggingRise, type RiggingMeasurement } from './riggingHeight'
 import Load3D from './Load3D.vue'
 import SheetViewer from './SheetViewer.vue'
 import type { Snapshot, Model } from './types'
@@ -40,7 +42,7 @@ const form = reactive({
   depth: '3',
   loadHeight: '2.5',
   clearance: '1',
-  slingHeight: '3.5',
+  sling: {datum:'top',value:null} as RiggingMeasurement,
   lugInset: '0',
   cgX: '0',
   cgY: '0',
@@ -68,6 +70,7 @@ const cgInside = computed(
     Math.abs(cg.value.y) <= halfDepth.value + 1e-9 &&
     Math.abs(cg.value.z) <= halfHeight.value + 1e-9,
 )
+const rise = computed(() => riggingRise(form.sling,+form.loadHeight))
 const geometryIssue = computed(() => {
   if (!geometryReady.value) return '请填写吊物长、宽、高和重量，数值均须大于零。'
   if (!cgInside.value) return '重心超出吊物轮廓，请检查坐标。'
@@ -76,14 +79,15 @@ const geometryIssue = computed(() => {
     return '吊点内缩须小于长、宽中较小尺寸的一半，且不能为负。'
   if (Math.abs(cg.value.x) >= halfLength.value - inset || Math.abs(cg.value.y) >= halfDepth.value - inset)
     return '重心水平投影须在四个吊点围成的区域内，请检查重心和吊点内缩。'
-  if (form.slingHeight !== '' && +form.slingHeight <= 0) return '请填写正的吊索高度，或留空自动推算。'
   if (form.clearance === '' || +form.clearance < 0) return '请填写非负的吊物底净空。'
   return ''
 })
-const previewSlingHeight = computed(() => form.slingHeight === ''
+const slingMissing = computed(() => form.sling.datum !== 'estimate' && (rise.value ?? 0) <= 0)
+const inputIssue = computed(() => geometryIssue.value || (slingMissing.value ? '请填写捆扎后高度或选择按吊点几何估算。' : ''))
+const previewSlingHeight = computed(() => form.sling.datum === 'estimate'
   ? Math.hypot(halfLength.value - +form.lugInset - Math.abs(cg.value.x),
                halfDepth.value - +form.lugInset - Math.abs(cg.value.y)) * Math.sqrt(3)
-  : +form.slingHeight)
+  : Math.max(0,rise.value ?? 0))
 const showResult = computed(() => step.value === 2 && snapshot.value !== null)
 const cgFromCentroid = computed(() => Math.hypot(cg.value.x, cg.value.y))
 let revision = 0
@@ -112,9 +116,9 @@ watch(
   { flush: 'sync' },
 )
 function goStep(next: number) {
-  if (next === 2 && geometryIssue.value) {
+  if (next === 2 && inputIssue.value) {
     noticeError.value = true
-    notice.value = geometryIssue.value
+    notice.value = inputIssue.value
     return
   }
   noticeError.value = false
@@ -127,9 +131,9 @@ async function calculate() {
   noticeError.value = false
   notice.value = ''
   try {
-    if (geometryIssue.value) {
+    if (inputIssue.value) {
       noticeError.value = true
-      notice.value = geometryIssue.value
+      notice.value = inputIssue.value
       step.value = 1
       return
     }
@@ -156,7 +160,7 @@ async function calculate() {
         width_m: +form.depth,
         height_m: +form.loadHeight,
         lug_inset_m: +form.lugInset || 0,
-        sling_height_m: +form.slingHeight > 0 ? +form.slingHeight : null,
+        sling_height_m: rise.value,
         cg: cg.value,
       },
     })
@@ -238,16 +242,16 @@ async function save(fmt: string) {
               {{ cgInside ? '水平偏移改变吊钩位置；竖向偏移改变重心标记高度。' : '重心超出吊物轮廓，请检查坐标。' }}
             </p>
           </fieldset>
+          <RiggingHeight v-model="form.sling" label="索具捆扎后高度" :body-height="+form.loadHeight" estimate/>
           <details>
-            <summary>吊索与净空</summary>
+            <summary>吊点与离地净空</summary>
             <div class="pair">
-              <label>吊索竖直高度 / m<input type="number" step="any" placeholder="留空自动推算" v-model="form.slingHeight" /></label>
               <label>吊点内缩 / m<input type="number" step="any" min="0" v-model="form.lugInset" /></label>
               <label>吊物底净空 / m<input required type="number" step="any" min="0" v-model="form.clearance" /></label>
             </div>
-            <p class="muted">所需起升高度 = 净空 + 吊物高 + 吊索高，自动推算，无需手工填写。</p>
+            <p class="muted">所需钩中心高度等于吊物底净空加捆扎后总高度。</p>
           </details>
-          <button class="primary" :disabled="!!geometryIssue">下一步：选择车型</button>
+          <button class="primary" :disabled="!!inputIssue">下一步：选择车型</button>
         </form>
 
         <form v-else @submit.prevent="calculate">
@@ -346,10 +350,12 @@ async function save(fmt: string) {
             <dd>{{ cap?.boom_len ?? '—' }} m</dd>
             <dt>表档起升高度</dt>
             <dd>{{ cap?.lift_height ?? '—' }} m</dd>
+            <dt>捆扎后索具净高{{ load?.sling_height_derived ? "（估算）" : "" }}</dt>
+            <dd>{{ load?.sling_height_m?.toFixed(2) ?? '—' }} m</dd>
             <dt>所需起升高度</dt>
             <dd>{{ load?.required_lift_height_m?.toFixed(2) ?? '—' }} m</dd>
-            <dt>最大索力</dt>
-            <dd>{{ load?.max_force_t?.toFixed(2) ?? '—' }} t</dd>
+            <dt>名义最大索力</dt>
+            <dd>{{ load?.max_force_t != null ? (load.max_force_t * 9.80665).toFixed(2) : '—' }} kN</dd>
             <dt>负荷率</dt>
             <dd>
               {{
@@ -359,6 +365,13 @@ async function save(fmt: string) {
               }}
             </dd>
           </dl>
+          <details v-if="load?.slings.length" class="sling-range"><summary>四索静力分载范围</summary>
+            <table><thead><tr><th>吊索</th><th>名义 / kN</th><th>范围 / kN</th></tr></thead>
+              <tbody><tr v-for="s in load.slings" :key="s.index"><th>{{s.name}}</th>
+                <td>{{(s.force_t*9.80665).toFixed(2)}}</td>
+                <td>{{s.equilibrium_min_kn.toFixed(2)}}–{{s.equilibrium_max_kn.toFixed(2)}}</td></tr></tbody></table>
+            <p class="muted">按当前水平姿态、单钩和四个固定吊点求各根索的静力范围。各上限分别取值，实际分载还取决于索长误差和刚度。</p>
+          </details>
           <p class="muted" v-for="w in snapshot?.warnings">{{ w }}</p>
         </aside>
       </div>

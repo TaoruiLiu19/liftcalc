@@ -200,7 +200,7 @@ def _load_section(document: Document, load: dict[str, Any], cap: dict[str, Any],
         )
         _add_table(
             document,
-            ["索号", "位置", "水平跨距 (m)", "与竖直夹角 (°)", "竖向分载", "索力 (t)"],
+            ["索号", "位置", "水平跨距 (m)", "与竖直夹角 (°)", "名义分载", "名义索力 (kN)", "静力范围 (kN)"],
             [
                 [
                     str(item["index"]),
@@ -208,7 +208,9 @@ def _load_section(document: Document, load: dict[str, Any], cap: dict[str, Any],
                     f"{float(item['run']):.2f}",
                     f"{float(item['angle_deg']):.1f}",
                     f"{float(item['share']):.3f}",
-                    f"{float(item['force_t']):.2f}",
+                    f"{float(item['force_t'])*9.80665:.2f}",
+                    (f"{item['equilibrium_min_kn']:.2f}–{item['equilibrium_max_kn']:.2f}"
+                     if "equilibrium_min_kn" in item and "equilibrium_max_kn" in item else "—"),
                 ]
                 for item in slings
             ],
@@ -221,8 +223,9 @@ def _load_section(document: Document, load: dict[str, Any], cap: dict[str, Any],
             else f"夹角范围 {min_angle:.1f}°～{max_angle:.1f}°（与竖直方向）"
         )
         document.add_paragraph(
-            f"最大索力 {float(load.get('max_force_t') or 0):.2f} t，"
-            f"最小索力 {float(load.get('min_force_t') or 0):.2f} t；{angle_text}。"
+            f"名义最大索力 {float(load.get('max_force_t') or 0)*9.80665:.2f} kN，"
+            f"名义最小索力 {float(load.get('min_force_t') or 0)*9.80665:.2f} kN。{angle_text}。"
+            "静力范围按固定水平姿态和各索仅受拉确定，各上限分别取值。"
         )
 
     split = cap.get("split") or {}

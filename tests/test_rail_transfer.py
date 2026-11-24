@@ -1,10 +1,12 @@
 import json
+import math
 from pathlib import Path
 
 import ezdxf
 import pytest
 
-from liftcalc.crane.transfer import Box, Transfer, analyze, clearance, plan_transfer, segment_gap
+from liftcalc.crane.transfer import (Box, Transfer, analyze, candidate_rank, clearance, interpolate_hook,
+                                     plan_transfer, segment_gap, world)
 from liftcalc.data.repo import Repo
 from liftcalc.dusk import DesktopApi
 
@@ -43,13 +45,16 @@ def test_mid_transfer_collision_and_exports(data, tmp_path):
     assert any("A全段可用钩高待核" in s["unknown"] for s in segments)
     assert segments[0]["start"] == 0 and segments[-1]["end"] == 1
     assert all(a["end"] == b["start"] for a,b in zip(segments,segments[1:]))
-    for drawing in result["drawings"]:
+    for index,drawing in enumerate(result["drawings"]):
         payload, name = api.render(drawing["id"], "dxf")
         path = tmp_path/name
         path.write_bytes(payload)
         doc = ezdxf.readfile(path)
         texts = [t.dxf.text for t in doc.modelspace().query("TEXT")]
         assert not any(word in t for t in texts for word in ("区间", "负荷率", "计算", "超限"))
+        if index == 0:
+            assert {"AG  6.00 m","BG  4.00 m","AB  10.00 m","A 钩高 6.00 m","B 钩高 6.00 m",
+                    "车底离地  1.00 m","L  12.00 m","B=3.00 m","点位坐标 / m"} <= set(texts)
         assert doc.header["$INSUNITS"] == 4 and len(doc.modelspace().query("TEXT")) >= 6
 
 
@@ -99,6 +104,11 @@ def test_plan_without_stations_or_waypoints():
     result = DesktopApi(Repo(ROOT/"data/liftcalc.sqlite")).calculate(data)
     assert result["poses"][0] == case.start and result["poses"][-1] == case.end
     assert len(result["poses"]) > 2 and result["stations"][0] != result["stations"][1]
+    mid = len(result["poses"])//2
+    # The demo turns and translates through the throat, with different hook paths.
+    inbound, throat, outbound = result["poses"][mid-1:mid+2]
+    assert abs(throat[2]) > .1 and abs(inbound[2]-throat[2]) > .01
+    assert math.dist(inbound[:2],outbound[:2]) > 0
     assert not any("相交" in m or "净距" in m for s in result["segments"] for m in s["unsafe"]+s["unknown"])
     assert any(s["unsafe"] for s in result["segments"])  # demo overload must remain visible
 
@@ -121,3 +131,54 @@ def test_legacy_exclusion_becomes_enclosing_square(data):
         cr["exclusion"] = 3
     case = Transfer.model_validate(data["transfer"])
     assert case.cranes[0].footprint_length == case.cranes[0].footprint_width == 6
+
+def test_master_hook_crosses_bearing_wrap_without_full_turn(data):
+    case = Transfer.model_validate(data["transfer"])
+    crane = case.cranes[0]
+    lug = case.lugs[0]
+    def body_pose(radius,azimuth,yaw):
+        angle = math.radians(azimuth)
+        rad = math.radians(yaw)
+        dx,dy = world((0,0,math.cos(rad),math.sin(rad)),lug)
+        return (crane.center[0]+radius*math.cos(angle)-dx,
+                crane.center[1]+radius*math.sin(angle)-dy,yaw)
+    start,end = body_pose(8,175,38),body_pose(12,-175,15)
+    mid = interpolate_hook(crane,lug,start,end,.5)
+    assert mid == pytest.approx(body_pose(10,180,26.5))
+    assert interpolate_hook(crane,lug,start,end,1) == pytest.approx(end)
+
+def test_unequal_measured_rises_reach_each_hook_check_and_sheet(data):
+    a,b = data["transfer"]["cranes"]
+    a.update(sling_height=1.75, verified_height=6.0)
+    b.update(sling_height=3.0, verified_height=6.0)
+    result = DesktopApi(Repo(ROOT/"data/liftcalc.sqlite")).calculate(data)
+    assert all("B全段可用钩高待核" in s["unknown"] and "A全段可用钩高待核" not in s["unknown"]
+               for s in result["segments"])
+    sheet = result["drawings"][0]["svg"]
+    assert "A 钩高 5.75 m" in sheet and "B 钩高 7.00 m" in sheet
+
+def test_clearance_threshold_uses_station_edges(data):
+    case = Transfer.model_validate(data["transfer"])
+    case.start = case.end = (0,0,90)
+    case.waypoints = []
+    for c,y in zip(case.cranes,(-12,12)):
+        c.center = (0,y)
+        c.footprint_length,c.footprint_width = 4,2
+    case.obstacles = [(2.75,-12,.5)]
+    case.plan_clearance = .3
+    repo = Repo(ROOT/"data/liftcalc.sqlite")
+    info = analyze(case,repo)
+    assert info["clearance"] == dict(lower_m=.25,pair="A 机占地 / 障碍 1",leg=1,start=0,end=1)
+    assert "A 机占地 / 障碍 1 平面净距不足" in info["segments"][0]["unsafe"]
+    case.auto_route = True
+    with pytest.raises(ValueError,match="净距"):
+        plan_transfer(case,repo)
+    case.plan_clearance = .25
+    path,info = plan_transfer(case,repo)
+    assert info["clearance"]["lower_m"] >= case.plan_clearance
+
+
+def test_planner_prefers_verified_then_pending_then_known_failure():
+    def rank(unsafe,unknown,ratio):
+        return candidate_rank([dict(unsafe=unsafe,unknown=unknown,ratios=[ratio])],1,5)
+    assert rank([],[],.75) < rank([],["缺表"],None) < rank(["超限"],[],.85)

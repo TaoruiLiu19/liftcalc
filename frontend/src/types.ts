@@ -10,6 +10,8 @@ export type Sling = {
   angle_deg: number
   share: number
   force_t: number
+  equilibrium_min_kn: number
+  equilibrium_max_kn: number
 }
 export type LoadSummary = {
   length_m: number
@@ -53,6 +55,7 @@ export type Snapshot = {
   }
 }
 export type TransferResult = {
+  clearance: { lower_m: number; pair: string; leg: number; start: number; end: number }
   poses: number[][]
   stations: {center: number[]; heading: number}[]
   drawings: { id: string; svg: string }[]
