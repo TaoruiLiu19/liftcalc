@@ -356,6 +356,34 @@ def analyze(case, repo, *, chart_cache=None):
     return dict(shares=shares, loads=loads, segments=segments, clearance=critical)
 
 
+def station_shift(crane, obstacles, heading, clearance_m, low, high):
+    """Nearest longitudinal shift outside the clearance-inflated disk intervals."""
+    c,s = math.cos(heading),math.sin(heading)
+    forbidden = []
+    for x,y,r in obstacles:
+        dx,dy = x-crane.center[0],y-crane.center[1]
+        along = dx*c + dy*s
+        outside = max(0, abs(-dx*s+dy*c) - crane.footprint_width/2)
+        padding = r + clearance_m
+        if outside > padding:
+            continue
+        half = crane.footprint_length/2 + math.sqrt(max(0, padding**2-outside**2))
+        forbidden.append((along-half, along+half))
+    # Merge overlapping intervals before choosing the closest exit: clearing
+    # the first obstacle alone may move the footprint into the next one.
+    merged = []
+    for a,b in sorted(forbidden):
+        if merged and a <= merged[-1][1]:
+            merged[-1] = (merged[-1][0],max(merged[-1][1],b))
+        else:
+            merged.append((a,b))
+    for left,right in merged:
+        if left < 0 < right:
+            choices = [v for v in (left,right) if low <= v <= high]
+            return min(choices,key=abs) if choices else None
+    return 0.
+
+
 def candidate_stations(case, heading):
     if not case.auto_stations:
         yield case.cranes
@@ -366,6 +394,8 @@ def candidate_stations(case, heading):
     normal = (-s,c)
     a,b = [world(case.pose(0),lug) for lug in case.lugs]
     sign = 1 if (b[0]-a[0])*normal[0]+(b[1]-a[1])*normal[1]>=0 else -1
+    travel = math.dist(case.start[:2], case.end[:2])
+    stagger = min(travel, math.dist(a,b), *(cr.footprint_length for cr in case.cranes))/4
     for fraction in (.5,.35,.65):
         mid = [case.start[i]+fraction*(case.end[i]-case.start[i]) for i in (0,1)]
         for margin in (.35,1.5):
@@ -375,6 +405,20 @@ def candidate_stations(case, heading):
                 xy = tuple(mid[i]+offset*normal[i] for i in (0,1))
                 pair.append(crane.model_copy(update={"center":xy,"heading":math.degrees(heading)}))
             yield tuple(pair)
+            offsets = []
+            if case.obstacles:
+                shifts = [station_shift(cr,case.obstacles,heading,case.plan_clearance+.12,
+                                        -fraction*travel,(1-fraction)*travel) for cr in pair]
+                if None not in shifts and any(shifts):
+                    offsets.append(tuple(shifts))
+            # Try both lead/lag orders at the corridor midpoint. Moving the
+            # pair together can leave one footprint blocked in either direction.
+            if fraction == .5 and stagger > 1e-9:
+                offsets.extend(((stagger,-stagger),(-stagger,stagger)))
+            for shifts in dict.fromkeys(offsets):
+                yield tuple(cr.model_copy(update={"center": (cr.center[0]+offset*c,
+                                                             cr.center[1]+offset*s)})
+                            for cr,offset in zip(pair,shifts))
 
 
 def interpolate_hook(crane, lug, start, end, t):
@@ -522,11 +566,21 @@ def plan_transfer(case, repo):
     heading = math.atan2(case.end[1]-case.start[1], case.end[0]-case.start[0])
     best = None
     chart_cache = {}
+    endpoints = [(world(case.pose(0),lug),world(case.pose(1),lug)) for lug in case.lugs]
     for pair in candidate_stations(case,heading):
         layout = case.model_copy(update={"cranes":pair})
         boxes = [cr.box for cr in pair]
-        if boxes[0].distance(boxes[1])<=0 or any(clearance(box,box.pose,o)<=0
-                for box in boxes for o in case.obstacles):
+        fixed_gap = min([boxes[0].distance(boxes[1])] +
+                        [clearance(box,box.pose,o) for box in boxes for o in case.obstacles])
+        if fixed_gap <= 0 or fixed_gap < case.plan_clearance:
+            continue
+        # Every possible route at these stations has the same end poses.
+        lower_bounds = [max(math.dist(cr.center,p) for p in ends)
+                        for cr,ends in zip(pair,endpoints)]
+        if any(cr.radius_limit is not None and r > cr.radius_limit + 1e-9
+               for cr,r in zip(pair,lower_bounds)):
+            continue
+        if best is not None and best[0][0] == 0 and max(lower_bounds) > best[0][3] + 1e-9:
             continue
         charts = [chart_rows(crane, repo, chart_cache) for crane in pair]
         free_routes = (route for refinement in (1, 1.5, 2)

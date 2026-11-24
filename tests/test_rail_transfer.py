@@ -6,12 +6,36 @@ import ezdxf
 import pytest
 
 from liftcalc.crane.transfer import (Box, Transfer, analyze, candidate_rank, candidate_routes, clearance, interpolate_hook,
-                                     plan_transfer, segment_gap, world)
+                                     plan_transfer, segment_gap, station_shift, world)
 from liftcalc.data.repo import Repo
 from liftcalc.dusk import DesktopApi
 from liftcalc.drawing.transfer import first_gate_crossing
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_automatic_stagger_around_opposing_obstacles():
+    data = json.loads((ROOT/"cases/rail-transfer-auto-stagger.json").read_text("utf8"))
+    assert all("center" not in c for c in data["transfer"]["cranes"])
+    result = DesktopApi(Repo(ROOT/"data/liftcalc.sqlite")).calculate(data)
+    a,b = (c["center"] for c in result["stations"])
+    assert a[0] > b[0] and math.dist(a,b) < data["transfer"]["length"]
+    assert result["clearance"]["lower_m"] >= data["transfer"]["plan_clearance"]
+    for segment in result["segments"]:
+        assert not segment["unsafe"] and not segment["unknown"]
+        assert all(upper < 12 for _,upper in segment["radii"])
+        assert max(segment["ratios"]) < .4
+
+
+def test_obstacle_shift_merges_overlaps_and_respects_corridor(data):
+    crane = Transfer.model_validate(data["transfer"]).cranes[0].model_copy(
+        update={"center":(0,0),"footprint_length":10,"footprint_width":5})
+    # Rotated longitudinal axis: the two disks exclude overlapping stations.
+    obstacles = [(0,0,1),(0,6,1)]
+    assert station_shift(crane,obstacles,math.pi/2,.5,-13,13) == pytest.approx(-6.5)
+    assert station_shift(crane,obstacles,math.pi/2,.5,-6,13) == pytest.approx(12.5)
+    assert station_shift(crane,obstacles,math.pi/2,.5,-6,12) is None
+    assert station_shift(crane,[(0,3.4,1)],0,.5,-10,10) == pytest.approx(-6.2)
 
 
 def test_staggered_cranes_allow_oblique_passage():
