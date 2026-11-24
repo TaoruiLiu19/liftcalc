@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import csv
+import re
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
@@ -69,6 +70,19 @@ def _convert(row: dict[str, str]) -> dict[str, Any]:
         else:
             out[key] = text
     return out
+
+
+_COUNTERWEIGHT_RE = re.compile(r"配重\s*(\d+(?:\.\d+)?)\s*t")
+
+
+def _config_counterweight(config_label: str, fallback: float | None) -> float | None:
+    """从 config 文案里取该配置的配重（如"主臂，配重20t，360°"）。
+
+    机型库的 counterweight_t 只作兜底；多配重机型留空，逐配置解析，
+    避免把某一档配重写成全机型统一值。
+    """
+    match = _COUNTERWEIGHT_RE.search(config_label or "")
+    return float(match.group(1)) if match else fallback
 
 
 def _read_csv(path: Path, expected: list[str]) -> list[dict[str, Any]]:
@@ -175,7 +189,7 @@ def build_db(pack_dir: Path, out_path: Path, data_version: str) -> BuildStats:
                             model_id,
                             (f"{config_label}·主臂{boom_len:g}m" if config_label else f"主臂{boom_len:g}m"),
                             boom_len,
-                            _num(meta_row.get("counterweight_t")),
+                            _config_counterweight(config_label, _num(meta_row.get("counterweight_t"))),
                         ),
                     )
                     config_id = int(cursor.lastrowid or 0)

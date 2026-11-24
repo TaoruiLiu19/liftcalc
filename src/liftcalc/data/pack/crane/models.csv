@@ -1,28 +1,28 @@
-model,brand,tonnage_class_t,axles,crane_type,counterweight_t,hook_main_t,hook_aux_t,max_outrigger_reaction_kN,self_weight_t,source_doc,source_page,outrigger_lx_m,outrigger_ly_m
-QY70K-1,徐工,70,4,truck,4.0,0.616,0.370,625.0,,徐工70~500吨汽车吊参数表.pdf,1,7.30,6.10
-QY100H-3,徐工,100,6,truck,,,,,54.0,徐工70~500吨汽车吊参数表.pdf,2,6.74,7.80
-QY130H-1,徐工,130,6,truck,30,,,,69.0,徐工70~500吨汽车吊参数表.pdf,4,7.04,8.50
-QAY200,徐工,200,6,all_terrain,,2.41,1.586,,,徐工70~500吨汽车吊参数表.pdf,7,9.625,8.7
-XCT25L5_Y,徐工,25,3,truck,5.8,0.297,0.06,,,https://www.wme.cn/xcmg-xct25l5y/xcmg-xct25l5y.pdf,14,5.23,6.4
-XCT60_Y,徐工,60,4,truck,6.5,0.517,,,,https://cdn2.antbuildz.com/images/801140e237a2c5fee8df6b44b.pdf,9,6.1,7.1
-XCT100_1,徐工,100,5,truck,45,,0.256,,,https://xcmg-eu.com/wp-content/uploads/2021/12/XCT100.pdf,15,8.45,7.9
-STC500,三一,50,4,truck,3.5,,0.090,,,https://sanyglobal-img.sany.com.cn/product/picture_album/20200929/STC500-13%20Broch-224154.pdf,7,6,7.2
-STC550C5,三一,55,4,truck,7.5,,,,,https://sanyglobal-img.sany.com.cn/sanyglobal-com-prd/prod/20251226/Sany-brochure-STC550C5-20240329-EN-CN_200143.pdf,10,6.05,7.4
-STC750,三一,75,4,truck,6.5,,0.140,,,https://www.sanyglobal.com/all/d/file/p/2017-03-02/af0f448e4762f6053306cb254e378409.pdf,7,6.1,7.6
-STC1100T7,三一,110,5,truck,38.5,,,,,https://sanyglobal-img.sany.com.cn/product/picture_album/20211027/Sany_crane-brochure_STC1100T7-150757.pdf,10,7.3,8.1
-STC1600T7,三一,160,5,truck,52,,,,,https://sanyglobal-img.sany.com.cn/sanyglobal-com-prd/prod/20251230/Sany-brochure-STC1600T7-20230606-EN-CN_220415.pdf,23,7.55,8.1
-STC2000C8-8,三一,200,5,truck,61,,,,,https://cos-www.sanygroup.com/2024/03/26/STC2000C8-8%2824%E6%AC%BE%29%E5%8D%95%E8%A1%8C%E6%9C%AC%E4%B8%AD%E6%96%87%E7%89%8820240129.pdf,7,7.7,8.3
-STC2400C8PHEV,三一,240,5,truck,71,,,,,https://cos-www.sanygroup.com/2024/07/03/STC2400C8PHEV%E5%8D%95%E8%A1%8C%E6%9C%AC%E4%B8%AD%E6%96%87%E7%89%8820240528%281%29.pdf,11,7.7,8.3
-STC3000C8-8,三一,300,5,truck,73.5,,,,,https://cos-www.sanygroup.com/2024/07/19/STC3000C8-8%E5%8D%95%E8%A1%8C%E6%9C%AC%E4%B8%AD%E6%96%87%E7%89%8820240711.pdf,11,7.7,8.3
-STC1200T7,三一,120,4,truck,36.2,,,,,https://sanyglobal-img.sany.com.cn/sanyglobal-com-prd/prod/20251226/Sany-brochure-STC1200T7-Brazil-Retarder-20231018-EN-CN_195416.pdf,16,,
-QAY300,徐工,300,7,all_terrain,,,,,,QAY300.pdf（lift/原始PDF）,,,
-XCT130L8_1,徐工,130,5,truck,,,,,,示例规格书_XCT130L8_1.pdf（docs/handover/original）,,,
-ZTC250A,中联,25,2,truck,,,,,,ZTC250A.pdf（lift/原始PDF）,,,
-STC1000C7-8,三一,100,4,truck,,,,,,STC1000C7-8.pdf（lift/原始PDF）,,,
-STC1300C7-8,三一,130,5,truck,,,,,,STC1300C7-8.pdf（lift/原始PDF）,,,
-STC1300C8-8,三一,130,5,truck,,,,,,STC1300C8-8.pdf（lift/原始PDF）,,,
-STC800C5-8,三一,80,4,truck,,,,,,STC800C5-8.pdf（lift/原始PDF）,,,
-STC500C5-8,三一,50,4,truck,,,,,,STC500C5-8.pdf + STC500C5-8系列.pdf（合并）,,,
-STC250C5-8,三一,25,3,truck,,,,,,STC250C5-8.pdf（lift/原始PDF）,,,
-STC400T5-6,三一,40,4,truck,,,,,,STC400T5-6.pdf（lift/原始PDF）,,,
-STC350C5-1,三一,35,4,truck,,,,,,STC350C5-1.pdf（lift/原始PDF）,,,
+model,brand,tonnage_class_t,axles,crane_type,counterweight_t,hook_main_t,hook_aux_t,max_outrigger_reaction_kN,self_weight_t,source_doc,source_page,outrigger_lx_m,outrigger_ly_m,metadata_note
+QY70K-1,徐工,70,4,truck,4.0,0.616,0.370,625.0,,徐工70~500吨汽车吊参数表.pdf,1,7.30,6.10,
+QY100H-3,徐工,100,6,truck,,,,,54.0,徐工70~500吨汽车吊参数表.pdf,2,6.74,7.80,
+QY130H-1,徐工,130,6,truck,30,,,,69.0,徐工70~500吨汽车吊参数表.pdf,4,7.04,8.50,
+QAY200,徐工,200,6,all_terrain,,2.41,1.586,,,徐工70~500吨汽车吊参数表.pdf,7,9.625,8.7,
+XCT25L5_Y,徐工,25,3,truck,5.8,0.297,0.06,,,https://www.wme.cn/xcmg-xct25l5y/xcmg-xct25l5y.pdf,14,5.23,6.4,
+XCT60_Y,徐工,60,4,truck,6.5,0.517,,,,https://cdn2.antbuildz.com/images/801140e237a2c5fee8df6b44b.pdf,9,6.1,7.1,
+XCT100_1,徐工,100,5,truck,45,,0.256,,,https://xcmg-eu.com/wp-content/uploads/2021/12/XCT100.pdf,15,8.45,7.9,
+STC500,三一,50,4,truck,3.5,,0.090,,,https://sanyglobal-img.sany.com.cn/product/picture_album/20200929/STC500-13%20Broch-224154.pdf,7,6,7.2,
+STC550C5,三一,55,4,truck,7.5,,,,,https://sanyglobal-img.sany.com.cn/sanyglobal-com-prd/prod/20251226/Sany-brochure-STC550C5-20240329-EN-CN_200143.pdf,10,6.05,7.4,
+STC750,三一,75,4,truck,6.5,,0.140,,,https://www.sanyglobal.com/all/d/file/p/2017-03-02/af0f448e4762f6053306cb254e378409.pdf,7,6.1,7.6,
+STC1100T7,三一,110,5,truck,38.5,,,,,https://sanyglobal-img.sany.com.cn/product/picture_album/20211027/Sany_crane-brochure_STC1100T7-150757.pdf,10,7.3,8.1,
+STC1600T7,三一,160,5,truck,52,,,,,https://sanyglobal-img.sany.com.cn/sanyglobal-com-prd/prod/20251230/Sany-brochure-STC1600T7-20230606-EN-CN_220415.pdf,23,7.55,8.1,
+STC2000C8-8,三一,200,5,truck,61,,,,,https://cos-www.sanygroup.com/2024/03/26/STC2000C8-8%2824%E6%AC%BE%29%E5%8D%95%E8%A1%8C%E6%9C%AC%E4%B8%AD%E6%96%87%E7%89%8820240129.pdf,7,7.7,8.3,
+STC2400C8PHEV,三一,240,5,truck,71,,,,,https://cos-www.sanygroup.com/2024/07/03/STC2400C8PHEV%E5%8D%95%E8%A1%8C%E6%9C%AC%E4%B8%AD%E6%96%87%E7%89%8820240528%281%29.pdf,11,7.7,8.3,
+STC3000C8-8,三一,300,5,truck,73.5,,,,,https://cos-www.sanygroup.com/2024/07/19/STC3000C8-8%E5%8D%95%E8%A1%8C%E6%9C%AC%E4%B8%AD%E6%96%87%E7%89%8820240711.pdf,11,7.7,8.3,
+STC1200T7,三一,120,4,truck,36.2,,,,,https://sanyglobal-img.sany.com.cn/sanyglobal-com-prd/prod/20251226/Sany-brochure-STC1200T7-Brazil-Retarder-20231018-EN-CN_195416.pdf,16,,,
+QAY300,徐工,300,7,all_terrain,,,,,79.679,QAY300.pdf（lift/原始PDF）,1,9.2,8.7,行驶状态自重；支腿横向8.7m全伸/6.5m半伸；配重按config逐档解析（0/19.2/35/50.5/78.5/98.2t）；规格书未给钩重，按实车填写
+XCT130L8_1,徐工,130,5,truck,,0.640,0.370,1068,60,示例规格书_XCT130L8_1.pdf（docs/handover/original）,9,8.89,7.9,自重60t含75t钩/配重固定装置、不含平衡重，另有54.991t空载状态；75t钩0.640t标配、8t钩0.370t、130t钩1.017t选配；配重按config解析
+ZTC250A,中联,25,2,truck,,,,,32.3,ZTC250A.pdf（lift/原始PDF）,3,5.40,6.2,行驶状态自重；支腿横向全伸6.2m/半伸4.25m；主钩25t/副钩4t但规格书未给钩重，按实车填写
+STC1000C7-8,三一,100,4,truck,,0.600,0.210,,50,STC1000C7-8.pdf（lift/原始PDF）,7,6.64,8.4,自重为公告状态；支腿横向8.4m全伸/5.55m半伸；60t锚钩0.600t、8t钩0.210t；配重按config 25/36t解析
+STC1300C7-8,三一,130,5,truck,,0.603,0.210,,54.99,STC1300C7-8.pdf（lift/原始PDF）,7,7.55,8.3,自重为常规公告状态（拆前支腿、带1.5t配重/副臂/备胎）；50t钩0.603t标配，75t/100t选配0.740/1.030t，8t钩0.210t；横向5.5m半伸；配重按config解析
+STC1300C8-8,三一,130,5,truck,,0.585,0.250,,54.99,STC1300C8-8.pdf（lift/原始PDF）,7,7.55,8.3,自重为常规公告状态（不带钩/配重/副臂）；60t钩0.585t、8t钩0.250t；横向5.5m半伸；配重按config 27/50t解析
+STC800C5-8,三一,80,4,truck,,0.480,0.120,,44.6,STC800C5-8.pdf（lift/原始PDF）,7,6.42,8.0,Val/Pro/Max三版自重44.6/46/48.2t、支腿纵向6.42/6.45/6.64m、横向8.0/8.0/8.4m，此处填Val，按实车核对；主钩Val/Pro 0.480t、Max 0.600t，副钩0.120/0.170t；配重按config解析
+STC500C5-8,三一,50,4,truck,,0.400,0.085,,37.2,STC500C5-8.pdf + STC500C5-8系列.pdf（合并）,7,6.05,7.4,合并25款（自重37.2t、支腿7.4(4.8)×6.05m）与系列Val/Pro（自重40.2/42.5t、8.0(5.25)×6.42m），此处填25款，按实车核对；Pro主钩0.415t/副钩0.120t；配重按config解析
+STC250C5-8,三一,25,3,truck,,0.250,0.052,,31.7,STC250C5-8.pdf（lift/原始PDF）,7,5.35,6.4,25t主钩0.250t、3t副钩0.052t；配重6.8t按config解析
+STC400T5-6,三一,40,4,truck,,0.400,0.090,,40,STC400T5-6.pdf（lift/原始PDF）,6,6.05,7.4,主钩400kg/40t、副钩90kg/5t；配重9t按config解析
+STC350C5-1,三一,35,4,truck,,0.400,0.090,,39,STC350C5-1.pdf（lift/原始PDF）,13,6.05,7.46,自重39t不含副配重；主钩400kg/35t、副钩90kg/5t；配重8.5t按config解析
