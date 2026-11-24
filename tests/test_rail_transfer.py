@@ -200,3 +200,15 @@ def test_lattice_certifies_two_radius_caps_and_rejects_unreachable_endpoint():
     case.cranes[1].radius_limit = 10
     with pytest.raises(ValueError, match="幅度上限"):
         plan_transfer(case, repo)
+
+
+def test_one_metre_gap_with_locked_stations():
+    data = json.loads((ROOT/"cases/rail-transfer-1m-clearance.json").read_text("utf8"))
+    result = DesktopApi(Repo(ROOT/"data/liftcalc.sqlite")).calculate(data)
+    assert [tuple(s["center"]) for s in result["stations"]] == [(0,-5.5), (0,5.5)]
+    assert result["clearance"]["lower_m"] >= 1
+    assert result["poses"][0] == (-11,0,90) and result["poses"][-1] == (11,0,90)
+    for s in result["segments"]:
+        assert not s["unknown"] and not s["unsafe"]
+        assert max(s["ratios"]) <= .8
+        assert all(upper < 15.5 for _,upper in s["radii"])

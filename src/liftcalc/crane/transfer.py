@@ -234,7 +234,11 @@ def analyze(case, repo, *, chart_cache=None):
 
     segments = []
     critical = None
-    for leg, start, end, travel, turn, sweep in route_intervals(case):
+    pending = [(interval, 0) for interval in route_intervals(case)]
+    interval_count = len(pending)
+    pending.reverse()
+    while pending:
+        (leg, start, end, travel, turn, sweep), depth = pending.pop()
         mid = (start+end)/2
         pose = case.pose(mid)
         unsafe, unknown = stationary.copy(), []
@@ -323,6 +327,19 @@ def analyze(case, repo, *, chart_cache=None):
         if boom_bound <= 0:
             unknown.append("两臂投影可能交叠，须核三维净空")
         bound, pair = lower_gap
+        # A midpoint sweep bound can straddle the requested clearance even
+        # when the geometry has room. Recheck both halves before classifying.
+        # Measured conflicts and fixed gaps cannot be resolved by subdivision.
+        threshold = case.plan_clearance
+        unresolved = bound <= 0 or bound < threshold
+        if (unresolved and depth < 3 and interval_count < 5000 and sweep > 0
+                and fixed_gap[0] > 0 and fixed_gap[0] >= threshold
+                and bound + sweep >= threshold
+                and not any("相交" in msg or "净距不足" in msg for msg in unsafe)):
+            interval_count += 1
+            for left,right in ((mid,end),(start,mid)):
+                pending.append(((leg,left,right,travel/2,turn/2,sweep/2), depth+1))
+            continue
         if 0 < case.plan_clearance and bound < case.plan_clearance and not any(
                 pair in msg and "净距不足" in msg for msg in unsafe):
             unknown.append(pair+" 未证实达到要求的平面净距")
@@ -486,7 +503,9 @@ def plan_transfer(case, repo):
                 for box in boxes for o in case.obstacles):
             continue
         charts = [chart_rows(crane, repo, chart_cache) for crane in pair]
-        free_routes = lattice_routes(layout, charts, loads, DUAL_LIMIT)
+        free_routes = (route for refinement in (1, 1.5, 2)
+                       for route in lattice_routes(layout, charts, loads, DUAL_LIMIT,
+                                                   refinement=refinement))
         for waypoints in chain(candidate_routes(layout), free_routes):
             path = layout.model_copy(update={"waypoints":waypoints})
             # Cheap collision rejection before evaluating the entire load chart.

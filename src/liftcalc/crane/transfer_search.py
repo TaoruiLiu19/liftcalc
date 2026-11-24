@@ -9,7 +9,7 @@ from functools import lru_cache
 from liftcalc.crane.transfer import clearance, point_segment, segment_gap, world
 
 
-def lattice_routes(case, charts, loads, limit):
+def lattice_routes(case, charts, loads, limit, *, refinement=1):
     """Generate grid paths; the caller certifies every interpolated interval."""
     origin = case.start
     dx, dy = case.end[0]-origin[0], case.end[1]-origin[1]
@@ -20,13 +20,18 @@ def lattice_routes(case, charts, loads, limit):
         ux, uy = 1.0, 0.0
     else:
         ux, uy = dx/distance, dy/distance
-    nx = min(24, max(1, math.ceil(distance / max(0.6, case.width/2))))
-    step = distance/nx if distance else max(0.6, case.width/2)
-    # Avoid ill-conditioned axes on almost pure rotations.
-    lateral = max(0.6, case.width/2, distance/24)
-    along_margin = min(8, max(2, math.ceil(case.length / max(step, 0.6))))
-    angle_steps = (math.floor((case.end[2]-origin[2])/15), math.ceil((case.end[2]-origin[2])/15))
-    angles = sorted({origin[2]+15*i for i in range(min(-12, angle_steps[0]), max(12, angle_steps[1])+1)}
+    spacing = max(0.6, case.width/2, distance/24) / refinement
+    nx = max(1, math.ceil(distance/spacing))
+    step = distance/nx if distance else spacing
+    lateral = spacing
+    # Keep the physical search corridor when decreasing the cell size.
+    margin_cells = math.ceil(8*refinement)
+    along_margin = min(margin_cells, max(2, math.ceil(case.length / max(step, 0.6/refinement))))
+    angle_step = 15/refinement
+    half_turn = round(180/angle_step)
+    angle_steps = (math.floor((case.end[2]-origin[2])/angle_step),
+                   math.ceil((case.end[2]-origin[2])/angle_step))
+    angles = sorted({origin[2]+angle_step*i for i in range(min(-half_turn, angle_steps[0]), max(half_turn, angle_steps[1])+1)}
                     | {case.end[2]})
     start = (0, 0, angles.index(origin[2]))
     goal = (nx if distance else 0, 0, angles.index(case.end[2]))
@@ -87,12 +92,17 @@ def lattice_routes(case, charts, loads, limit):
         queue = [(*initial, start)]
         best = {start: initial}
         parent = {}
+        expanded = 0
         directions = [(x,y,k) for x,y in ((1,0),(-1,0),(0,1),(0,-1),(0,0))
                       for k in (-1,0,1) if x or y or k]
         while queue:
             peak, steps, node = heapq.heappop(queue)
             if (peak, steps) != best[node]:
                 continue
+            # Refinement supplements the coarse search and bounds desktop latency.
+            expanded += 1
+            if refinement > 1 and expanded > 12000:
+                return None
             if node == goal:
                 chain = [node]
                 while chain[-1] != start:
@@ -109,7 +119,7 @@ def lattice_routes(case, charts, loads, limit):
             pose = coordinates(node)
             for sx,sy,sk in directions:
                 nxt = (x+sx,y+sy,k+sk)
-                if not (-along_margin <= nxt[0] <= nx+along_margin and abs(nxt[1]) <= 8
+                if not (-along_margin <= nxt[0] <= nx+along_margin and abs(nxt[1]) <= margin_cells
                         and 0 <= nxt[2] < len(angles)):
                     continue
                 other = coordinates(nxt)
@@ -129,7 +139,7 @@ def lattice_routes(case, charts, loads, limit):
         return None
 
     seen = set()
-    for required in (3, 1, 2, 0, None):
+    for required in ((3,) if refinement > 1 else (3, 1, 2, 0, None)):
         route = search(required)
         if route is not None and tuple(route) not in seen:
             seen.add(tuple(route))

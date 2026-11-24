@@ -54,7 +54,9 @@ def test_duerr_table_one_diagonal_envelope():
             assert leg.equilibrium_min_kn - 1e-10 <= tension <= leg.equilibrium_max_kn + 1e-10
 
 
-@pytest.mark.parametrize("threshold,status", [(.30,"pass"), (.36,"unknown"), (.40,"fail")])
+@pytest.mark.parametrize("threshold,status", [
+    (.30,"pass"), (.36,"pass"), (.37689,"unknown"), (.40,"fail"),
+])
 def test_exact_mid_swing_clearance(api, rotation, threshold, status):
     rotation["transfer"]["plan_clearance"] = threshold
     r = api.calculate(rotation)
@@ -64,8 +66,14 @@ def test_exact_mid_swing_clearance(api, rotation, threshold, status):
     half_step_sweep = math.sqrt(17)*math.radians(.5)
     assert exact - half_step_sweep <= info["lower_m"] <= exact + 1e-12
     assert info["pair"] == "吊物 / 障碍1"
-    offset = math.degrees(math.atan2(1,4))
-    assert any(info["start"]*90 <= yaw <= info["end"]*90 for yaw in (45-offset,45+offset))
+    if threshold == .30:  # Uniform intervals: the limiting bound contains an exact minimizer.
+        offset = math.degrees(math.atan2(1,4))
+        assert any(info["start"]*90 <= yaw <= info["end"]*90 for yaw in (45-offset,45+offset))
+    assert (info["lower_m"] >= threshold) == (status == "pass")
+    segments = r["segments"]
+    assert segments[0]["start"] == 0 and segments[-1]["end"] == 1
+    assert all(a["end"] == b["start"] for a,b in zip(segments, segments[1:]))
+    assert all(s["start"] < s["end"] for s in segments)
     unsafe = {m for segment in r["segments"] for m in segment["unsafe"]}
     unknown = {m for segment in r["segments"] for m in segment["unknown"]}
     assert ("吊物 / 障碍1 平面净距不足" in unsafe) == (status == "fail")

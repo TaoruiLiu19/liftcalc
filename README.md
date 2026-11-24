@@ -46,7 +46,7 @@ python -m venv .venv
 
 [吊点与重心编辑页](docs/handover/assets/transfer-points.png) · [静力图 DXF](docs/handover/assets/01-static.dxf) · [轨迹图 DXF](docs/handover/assets/02-trajectory.dxf) · [12 m 列车演示输入](cases/rail-transfer-demo.json)
 
-在 A、B 机工况页可分别填写允许最大工作幅度。规划器同时比较预设路径与平面位姿格网上自由平移、转动的路径。同等校核状态和问题数下，先压低两机较大的峰值幅度上界，再比较另一台的上界。结果页显示两侧峰值上界及其所在区间。模型与实算数据见[双机幅度优化对照](cases/README.md#双机幅度优化对照)。
+在 A、B 机工况页可分别填写允许最大工作幅度。规划器同时比较预设路径与平面位姿格网上自由平移、转动的路径。同等校核状态和问题数下，先压低两机较大的峰值幅度上界，再比较另一台的上界。结果页显示两侧峰值上界及其所在区间。对于窄通道，程序会尝试更小的转角和平移步长，并在接近要求净距的区间加密校核。可复算 [6 t 列车、机位锁定、净距至少 1 m 的工况](cases/rail-transfer-1m-clearance.json)。模型与实算数据见[双机幅度优化对照](cases/README.md#双机幅度优化对照)。
 
 ## 算例验证
 
