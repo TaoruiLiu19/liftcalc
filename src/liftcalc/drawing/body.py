@@ -3,8 +3,9 @@
 轮廓按参考图的像素坐标描点（`docs/handover/assets/原版吊装立面-汽车吊.png` 的车身），
 所以形状与素材一致，但**矢量化**——放大不发虚，DXF 里也有车身。
 
-轴数为吨级示意（≤100 t 四轴、100–300 t 六轴、≥300 t 八轴），轮胎按真实直径画，
-不是厂商的轴距/轴荷数据。坐标同样走 ``paper``（模型 m → 图面 mm），与立面几何严格对齐。
+轴数取机型库 ``models.csv`` 的 ``axles`` 列（来自厂商规格书轴荷表/转向驱动描述的真实车轴数），
+查不到的机型按五轴示意描点，轮胎按真实直径画，轴距是示意布局、不是厂商轴距数据。
+坐标同样走 ``paper``（模型 m → 图面 mm），与立面几何严格对齐。
 """
 
 from __future__ import annotations
@@ -26,35 +27,32 @@ GROUND_PX = 328.0                      # 参考图上地面线的 y
 WHEEL_R = 0.64                         # 轮胎半径（按参考图轮拱约 1.28 m 直径）
 
 # 每个轴数的轴距范围（参考图 px），取够放下 n 个 1.28 m 轮胎且不互相盖住
-AXLE_SPANS = {4: (209.0, 726.0), 5: (209.0, 726.0), 6: (196.0, 784.0), 8: (168.0, 862.0)}
+AXLE_SPANS = {3: (209.0, 620.0), 4: (209.0, 726.0), 5: (209.0, 726.0),
+              6: (196.0, 784.0), 7: (168.0, 838.0), 8: (168.0, 862.0)}
 DEFAULT_AXLES = 5
 
 
 @lru_cache(maxsize=1)
-def _catalog_tonnages() -> dict[tuple[str, str], float]:
+def _catalog_axles() -> dict[tuple[str, str], int]:
+    """机型库里的真实轴数（厂商规格书提取，非吨级推算）。"""
     pack = Path(__file__).resolve().parents[1] / "data/pack/crane/models.csv"
     with pack.open(encoding="utf-8-sig", newline="") as stream:
-        return {
-            (row["brand"], row["model"]): float(row["tonnage_class_t"])
-            for row in csv.DictReader(stream)
-            if row["tonnage_class_t"]
-        }
-
-
-def axle_count(tonnage: float | None) -> int | None:
-    """吨级 → 轴数示意。阈值只是"看起来像那么大的车"，不是厂商参数。"""
-    if tonnage is None or tonnage <= 0:
-        return None
-    if tonnage <= 100:
-        return 4
-    return 8 if tonnage >= 300 else 6
+        catalog: dict[tuple[str, str], int] = {}
+        for row in csv.DictReader(stream):
+            value = (row.get("axles") or "").strip()
+            if value:
+                catalog[(row["brand"], row["model"])] = int(float(value))
+        return catalog
 
 
 def drawing_axles(cap: dict, detail: dict, brand: str) -> int | None:
-    tonnage = cap.get("tonnage_class")
-    if tonnage is None:
-        tonnage = _catalog_tonnages().get((brand, detail.get("model") or cap.get("model")))
-    return axle_count(tonnage)
+    """真实轴数：优先结果/机型信息里显式给出的 axles，否则按机型查机型库；
+    都查不到返回 None（车身仍按五轴示意描点，不留空底盘）。"""
+    for source in (cap, detail):
+        value = source.get("axles") if isinstance(source, dict) else None
+        if value:
+            return int(value)
+    return _catalog_axles().get((brand, detail.get("model") or cap.get("model")))
 
 
 def axle_stations(count: int | None) -> tuple[float, ...]:
