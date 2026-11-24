@@ -1,21 +1,28 @@
 """A3 vector sheets for a horizontal two-hook rail transfer."""
 import math
+from itertools import accumulate
 
-from liftcalc.crane.transfer import world
+from liftcalc.crane.transfer import Box, world
 from liftcalc.drawing import dim
-from liftcalc.drawing.primitives import Circle, Figure, Line, Polyline, Text
-from liftcalc.drawing.sheet import Sheet, draw_frame, title_block
-from liftcalc.drawing.style import SCALE_LADDER
+from liftcalc.drawing.body import BODY_MODEL_FRONT, MODEL_REAR, draw_truck, drawing_axles
+from liftcalc.drawing.figures import (
+    BLOCK_GAP, BLOCK_H, BOOM_HEAD_REACH, ElevationModel, _Paper, _draw_boom,
+    _draw_hook_block, _draw_luffing_cylinder, _draw_rope,
+)
+from liftcalc.drawing.primitives import ALIGN_CENTER, ALIGN_RIGHT, Circle, Figure, Line, Polyline, Text
+from liftcalc.drawing.sheet import Sheet, draw_frame, draw_ground, overlaps, title_block
+from liftcalc.drawing.style import LAYER_TRACE_A, LAYER_TRACE_B, LAYER_TRACE_CENTER, LAYER_TRACE_GATE, SCALE_LADDER
 
 
-def drawing(title, number, max_scale):
+def drawing(title, number, max_scale, kind):
     page = Sheet(420, 297)
     denominator = next((n for n in SCALE_LADDER if 1000/n <= max_scale),
                        max(500, math.ceil(1000/max_scale/50)*50))
     fig = Figure(title, page.width, page.height)
+    fig.meta["kind"] = kind
     draw_frame(fig, page)
     title_block(fig, page, title=title, subtitle="A3", scale_text=f"1:{denominator}",
-                drawing_no=f"DT-0{number}", project="列车双机上轨", date="", sheet_no=f"{number}/2")
+                drawing_no=f"DT-0{number}", project="列车双机上轨", date="", sheet_no=f"{number}/4")
     return fig, 1000/denominator
 
 
@@ -32,7 +39,7 @@ def statics(case, result, corners):
     half = max(station(p) for p in corners)
     hook_z = [case.bottom+case.height+c.sling_height for c in case.cranes]
     fig,k = drawing("双机抬吊静力图", 1, min(275/(2*half), 193/case.length,
-                                             72/max(hook_z), 56/case.width))
+                                             72/max(hook_z), 56/case.width), "statics")
     def x(p):
         return 216+k*station(p)
     ground = 187
@@ -120,6 +127,24 @@ def first_gate_crossing(case):
     return None
 
 
+def patterned_path(fig, points, dash, gap, layer):
+    """Carry the dash phase through vertices of a sampled path."""
+    distance = 0.0
+    period = dash + gap
+    for a, b in zip(points, points[1:]):
+        length = math.dist(a, b)
+        if length < 1e-9:
+            continue
+        end = distance + length
+        dx, dy = (b[0] - a[0]) / length, (b[1] - a[1]) / length
+        for mark in range(math.floor(distance / period), math.ceil(end / period)):
+            lo = max(distance, mark * period) - distance
+            hi = min(end, mark * period + dash) - distance
+            if hi > lo:
+                fig.add(Line(a[0] + lo*dx, a[1] + lo*dy, a[0] + hi*dx, a[1] + hi*dy, layer))
+        distance = end
+
+
 def trajectory(case, result, corners):
     poses = [case.pose(s["start"]) for s in result["segments"]]+[case.pose(1)]
     disks = case.obstacles
@@ -127,67 +152,224 @@ def trajectory(case, result, corners):
     bounds.extend(p for crane in case.cranes for p in crane.box.corners)
     for x,y,r in disks:
         bounds.extend(((x-r,y-r),(x+r,y+r)))
-    rails = [(world(poses[-1],(-case.length*.85,y)),world(poses[-1],(case.length*.85,y)))
+    rail_extent = case.length*.67
+    rails = [(world(poses[-1],(-rail_extent,y)),world(poses[-1],(rail_extent,y)))
              for y in (-case.gauge/2,case.gauge/2)]
     bounds.extend(p for line in rails for p in line)
     xs,ys = zip(*bounds)
-    fig,k = drawing("双机转运轨迹平面图",2,min(327/(max(xs)-min(xs)),196/(max(ys)-min(ys))))
+    fig,k = drawing("双机转运轨迹平面图", 2,
+                    min(313/(max(xs)-min(xs)), 178/(max(ys)-min(ys))), "trajectory")
+    geometry_start = len(fig.primitives)
     mx,my = (min(xs)+max(xs))/2,(min(ys)+max(ys))/2
     def paper(p):
-        return 219+(p[0]-mx)*k,163+(p[1]-my)*k
+        return 219+(p[0]-mx)*k,159+(p[1]-my)*k
+
     for left,right in rails:
-        fig.add(Line(*paper(left),*paper(right),"OUTLINE"))
+        fig.add(Line(*paper(left),*paper(right),"NOTE"))
     # Sleepers identify the target track; their spacing is a drawing convention.
     for j in range(19):
-        u=case.length*.85*(j/9-1)
+        u=rail_extent*(j/9-1)
         ends=[paper(world(poses[-1],(u,side*case.gauge*.76))) for side in (-1,1)]
         fig.add(Line(*ends[0],*ends[1],"THIN"))
     ca,cb = case.cranes
-    middle = tuple((a+b)/2 for a,b in zip(ca.center,cb.center))
     crossing = first_gate_crossing(case)
-    gate_pose = crossing[0] if crossing else min(poses,key=lambda p: math.dist(p[:2],middle))
+    gate_pose = crossing[0] if crossing else None
     if crossing:
-        fig.add(Line(*paper(ca.center),*paper(cb.center),"CENTER"),
-                Polyline(tuple(paper(world(gate_pose,p)) for p in corners),True,"RIGGING"),
-                Text(36,274,f"首次穿越两机中心连线（法向为 0°） · 车体 {crossing[1]:.1f}°，"
-                     f"形心行进 {crossing[2]:.1f}°",height=3.2))
-    for j,crane in enumerate(case.cranes):
+        dim.dash_dot(fig, paper(ca.center), paper(cb.center), layer="NOTE")
+        fig.add(Polyline(tuple(paper(world(gate_pose,p)) for p in corners),True,LAYER_TRACE_GATE),
+                Text(36,269,f"首次穿隙 · 车体 {crossing[1]:.1f}°，形心行进 {crossing[2]:.1f}°"
+                     "（以两机中心连线法向为 0°）",height=3.5,layer=LAYER_TRACE_GATE))
+
+    layers = (LAYER_TRACE_A, LAYER_TRACE_B)
+    patterns = ((4.5, 2.0), (1.6, 2.1))
+    for crane, layer in zip(case.cranes, layers):
         px,py = paper(crane.center)
-        fig.add(Polyline(tuple(paper(p) for p in crane.box.corners)),
-                Text(px+2,py+6,"AB"[j]+" 机",height=3),
-                Line(px,py,*paper(world(gate_pose,case.lugs[j])),"NOTE"))
-        cross(fig,px,py,3)
-    for j,(x,y,r) in enumerate(disks):
+        fig.add(Polyline(tuple(paper(p) for p in crane.box.corners), True, layer),
+                Circle(px, py, 1.8, layer), Line(px-3, py, px+3, py, layer),
+                Line(px, py-3, px, py+3, layer))
+    for x,y,r in disks:
         px,py = paper((x,y))
-        fig.add(Circle(px,py,r*k,"THIN"),Text(px+2,py+6,f"障碍 {j+1}",height=3))
+        fig.add(Circle(px, py, r*k, "NOTE"))
+
     legs = len(case.route)-1
-    keyframes = sorted({round(j*legs/4) for j in range(5)})
-    for i in keyframes:
-        pose = case.pose(i/legs)
-        layer = "OUTLINE" if i in (0,legs) else "NOTE"
-        fig.add(Polyline(tuple(paper(world(pose,p)) for p in corners),True,layer))
-        px,py = paper(world(pose,corners[2]))
-        fig.add(Text(px+1,py+4,f"P{i}",height=3.4))
-    for lug in case.lugs:
+    start_outline = tuple(paper(world(poses[0], p)) for p in corners)
+    end_outline = tuple(paper(world(poses[-1], p)) for p in corners)
+    patterned_path(fig, (*start_outline, start_outline[0]), 4, 2, "OUTLINE")
+    fig.add(Polyline(end_outline, True, "OUTLINE"))
+    for lug, (dash, gap), layer in zip(case.lugs, patterns, layers):
         path = tuple(paper(world(p,lug)) for p in poses)
-        fig.add(Polyline(path,False,"CENTER"))
+        patterned_path(fig, path, dash, gap, layer)
+
     centerline = tuple(paper(p[:2]) for p in case.route)
-    fig.add(Polyline(centerline,False,"THIN"))
-    for i in keyframes[:-1]:
-        a,b = centerline[i:i+2]
-        d = math.dist(a,b)
-        if d>4:
-            dim.arrow(fig,(a[0]+b[0])/2,(a[1]+b[1])/2,(b[0]-a[0])/d,(b[1]-a[1])/d,layer="OUTLINE")
+    fig.add(Polyline(centerline, False, LAYER_TRACE_CENTER))
+    distances = list(accumulate((math.dist(a, b) for a, b in zip(centerline, centerline[1:])), initial=0.0))
+    travel = distances[-1]
+    if travel >= 10:
+        for fraction in ((.25, .5, .75) if travel >= 60 else (.5,)):
+            position = fraction * travel
+            for a, b, lo, hi in zip(centerline, centerline[1:], distances, distances[1:]):
+                if lo <= position < hi:
+                    dx, dy = (b[0]-a[0])/(hi-lo), (b[1]-a[1])/(hi-lo)
+                    dim.arrow(fig, a[0]+dx*(position-lo), a[1]+dy*(position-lo), dx, dy,
+                              size=3.8, layer=LAYER_TRACE_CENTER)
+                    break
+    start, end = centerline[0], centerline[-1]
+    fig.add(Circle(*start, 2.0, LAYER_TRACE_CENTER), Circle(*end, 2.0, LAYER_TRACE_CENTER))
+    label = trajectory_labels(fig, geometry_start)
+    label(start, "P0 起吊", LAYER_TRACE_CENTER, below=True, height=4.5)
+    label(end, f"P{legs} 落位", LAYER_TRACE_CENTER, height=4.5)
+    for tag, crane, layer in zip("AB", case.cranes, layers):
+        px, py = paper(crane.center)
+        label((px, py), f"{tag} 机", layer, height=4.6)
+    if gate_pose:
+        label(paper(gate_pose[:2]), "穿隙姿态", LAYER_TRACE_GATE, height=3.5)
+    for index, (x,y,_) in enumerate(disks, 1):
+        label(paper((x, y)), f"障碍 {index}", "NOTE", height=3.1)
+    marked = [start, end]
+    for index in sorted({round(legs*fraction) for fraction in (.25, .5, .75)} - {0, legs}):
+        point = centerline[index]
+        if all(math.dist(point, previous) >= 24 for previous in marked):
+            fig.add(Circle(*point, 1.1, LAYER_TRACE_CENTER))
+            label(point, f"P{index}", LAYER_TRACE_CENTER, below=True, height=3.3)
+            marked.append(point)
+
     spacing = math.dist(ca.center,cb.center)
-    fig.add(Text(36,281,f"P0 起吊  →  P{legs} 落位    ·    中间编号为选示姿态",height=3.7),
-            Text(35,34,f"回转中心距  {spacing:.2f} m",height=3.4),
-            Text(35,24,f"矩形边界净距  {ca.box.distance(cb.box):.2f} m",height=3.4),
-            Text(35,14,f"车长  {case.length:g} m     车宽  {case.width:g} m     轨距  {case.gauge:g} m",height=3.4),
-            Text(158,34,"矩形为吊机占地包络",height=3.2),
-            Line(157,21,171,21,"CENTER"),Text(174,23,"吊点轨迹",height=3.2))
+    fig.add(Text(36,282,f"P0 起吊  →  P{legs} 落位",height=5),
+            Text(403,281,f"回转中心距 {spacing:.2f} m   ·   两机占地净距 {ca.box.distance(cb.box):.2f} m",
+                 height=3.6,align=ALIGN_RIGHT),
+            Text(403,269,f"转运净距下界 ≥ {math.floor(result['clearance']['lower_m']*1000)/1000:.3f} m",
+                 height=3.6,align=ALIGN_RIGHT),
+            Text(36,14,f"车长 {case.length:g} m   ·   车宽 {case.width:g} m   ·   轨距 {case.gauge:g} m",
+                 height=3.4),
+            Line(36,40,56,40,LAYER_TRACE_CENTER),Text(62,42,"车体形心路径",height=3.8),
+            Text(154,42,"矩形：吊机占地 · 十字：回转中心",height=3.6),
+            Text(154,30,"车体：起吊虚线 / 落位实线",height=3.6),
+            Text(154,18,"圆形：场地障碍",height=3.5))
+    for y, tag, (dash, gap), layer in zip((29, 19), "AB", patterns, layers):
+        patterned_path(fig, ((36, y), (56, y)), dash, gap, layer)
+        fig.add(Text(62, y+2, f"吊点 {tag} 路径", height=3.6, layer=layer))
+    return fig
+
+
+def trajectory_labels(fig, geometry_start):
+    """Place captions near their leader points without covering route strokes."""
+    strokes = []
+    for item in fig.primitives[geometry_start:]:
+        if isinstance(item, Line):
+            points = ((item.x1, item.y1), (item.x2, item.y2))
+        elif isinstance(item, Polyline):
+            points = (*item.points, item.points[0]) if item.closed else item.points
+        else:
+            continue
+        for a, b in zip(points, points[1:]):
+            length = math.dist(a, b)
+            if length > 1e-9:
+                x,y = (a[0]+b[0])/2, (a[1]+b[1])/2
+                dx,dy = (b[0]-a[0])/length, (b[1]-a[1])/length
+                bounds = (min(a[0],b[0]), min(a[1],b[1]), max(a[0],b[0]), max(a[1],b[1]))
+                strokes.append((bounds, (x,y,dx,dy), length))
+
+    used = []
+
+    def label(point, content, layer, *, below=False, height=3.8):
+        x, y = point
+        vertical = -1 if below else 1
+        offsets = ((9, vertical*12), (-9, vertical*12), (9, -vertical*12), (-9, -vertical*12),
+                   (16, vertical*21), (-16, vertical*21), (19, -vertical*25), (-19, -vertical*25))
+        fallback = None
+        for dx, dy in offsets:
+            note = Text(x+dx, y+dy, content, height=height, layer=layer,
+                        align=ALIGN_RIGHT if dx < 0 else "left")
+            left, bottom, right, top = bounds = note.bbox()
+            if (not (35 <= left <= right <= 406 and 58 <= bottom <= top <= 260)
+                    or any(overlaps(bounds, other, margin=1.5) for other in used)):
+                continue
+            end = (right + 2 if dx < 0 else left - 2, y+dy-height/2)
+            if fallback is None:
+                fallback = (bounds, end, note)
+            caption = Box(((left+right)/2, (top+bottom)/2), right-left+2, top-bottom+2, 0)
+            if not any(overlaps(bounds, edge, margin=1) and caption.separation(pose, length, 0) <= 0
+                       for edge, pose, length in strokes):
+                fallback = (bounds, end, note)
+                break
+        if fallback:
+            bounds, end, note = fallback
+            used.append(bounds)
+            fig.add(Line(x, y, *end, "NOTE"), note)
+
+    return label
+
+
+def crane_elevation(case, result, corners, side):
+    """Project the train onto the vertical plane through this crane and its hook."""
+    crane, lug = case.cranes[side], case.lugs[side]
+    tag = "AB"[side]
+    times = (t for segment in result["segments"]
+             for t in (segment["start"], (segment["start"] + segment["end"])/2, segment["end"]))
+    radius, time = max((math.dist(crane.center, world(case.pose(t), lug)), -t) for t in times)
+    time = -time
+    pose = case.pose(time)
+    hook = world(pose, lug)
+    if radius > 1e-9:
+        ux, uy = (hook[0]-crane.center[0])/radius, (hook[1]-crane.center[1])/radius
+    else:
+        ux, uy = pose[2:]
+
+    def radial(point):
+        x, y = world(pose, point)
+        return (x-crane.center[0])*ux + (y-crane.center[1])*uy
+
+    projected = [radial(point) for point in corners]
+    rear, front = min(projected), max(projected)
+    body_top = case.bottom + case.height
+    hook_height = body_top + crane.sling_height
+    horizontal = (radius - BOOM_HEAD_REACH) / crane.boom
+    reaches = -1 <= horizontal <= 1
+    angle = math.degrees(math.acos(min(1, max(-1, horizontal))))
+    model = ElevationModel(crane.boom, angle, radius, hook_height, front-rear, case.height)
+    usable_rope = reaches and model.block_top <= model.tip_height - .61
+    left = min(rear, -BODY_MODEL_FRONT)
+    right = max(front, radius + 1.1, MODEL_REAR)
+    top = max(hook_height + BLOCK_GAP + BLOCK_H, model.tip_height + 1 if reaches else 5.5)
+    fig,k = drawing(f"{tag} 机吊装立面图", 3+side, min(317/(right-left), 195/top), f"elevation-{tag.lower()}")
+    ground = 68
+    paper = _Paper(k, 225+k*(left+right)/2, ground)
+    draw_ground(fig, 39, 402, ground)
+    axles = drawing_axles({}, {"model": crane.model}, crane.brand)
+    draw_truck(fig, paper, axles, model.hinge if reaches else (0, model.hinge[1]), crane.model)
+    if reaches:
+        _draw_boom(fig, paper, model)
+        _draw_luffing_cylinder(fig, paper, model)
+    _draw_hook_block(fig, paper, model)
+    if usable_rope:
+        _draw_rope(fig, paper, model)
+
+    body = ((rear,case.bottom), (front,case.bottom), (front,body_top), (rear,body_top))
+    hx, hy = paper(radius, hook_height)
+    sx, sy = paper(radius, body_top)
+    cx, cy = paper((rear+front)/2, case.bottom+case.height/2)
+    fig.add(Polyline(tuple(paper(x,y) for x,y in body), True),
+            Line(sx,sy,hx,hy,"RIGGING"), Circle(sx,sy,1.15,"RIGGING"),
+            Text(cx,cy+1.5,"车体投影",height=3.3,align=ALIGN_CENTER))
+    dim.leader(fig, (sx,sy), (sx-7,sy+7), f"吊点 {tag}", align=ALIGN_RIGHT, height=3.2)
+    dim.v_dim(fig,ground,hy,paper(right,0)[0]-11,f"H={hook_height:.2f} m",ref_x=hx,side="left")
+    dim.h_dim(fig,hx,paper.ox,ground-10,f"R={radius:.2f} m",ref_y=ground)
+    upper = max(s["radii"][side][1] for s in result["segments"])
+    leg = min(len(case.route)-2, int(time*(len(case.route)-1)))
+    fig.add(Text(36,282,f"{tag} 机  ·  {crane.brand} {crane.model}   ·   {crane.config}",height=4.7),
+            Text(36,272,f"本机幅度采样峰值姿态  P{leg} → P{leg+1}   ·   路径 {100*time:.1f}%",height=3.6),
+            Text(36,49,f"固定臂长 {crane.boom:g} m   ·   索具高度 {crane.sling_height:.2f} m   ·   "
+                 f"全程幅度上界 {math.ceil(upper*100)/100:.2f} m",height=3.7),
+            Text(36,37,f"吊物分载 {case.mass*result['shares'][side]:.2f} t   ·   "
+                 f"本机总吊重 {result['loads'][side]:.2f} t",height=3.7),
+            Text(36,24,"沿本机回转中心至本侧吊点投影，底盘为侧视示意。臂架仰角由幅度和臂长推算。",height=3.2))
+    if not usable_rope:
+        message = "示意臂长够不到本侧吊点" if not reaches else "示意臂端与所需吊钩高度之间空间不足"
+        fig.add(Text(36,14,f"{message}，起升绳省略。",height=3.2,layer="RIGGING"))
     return fig
 
 
 def sheets(case,result):
     corners = [(x*case.length/2,y*case.width/2) for x,y in ((-1,-1),(1,-1),(1,1),(-1,1))]
-    return statics(case,result,corners), trajectory(case,result,corners)
+    return (statics(case,result,corners), trajectory(case,result,corners),
+            crane_elevation(case,result,corners,0), crane_elevation(case,result,corners,1))

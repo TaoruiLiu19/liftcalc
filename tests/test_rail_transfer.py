@@ -112,6 +112,9 @@ def test_mid_transfer_collision_and_exports(data, tmp_path):
     assert any("A全段可用钩高待核" in s["unknown"] for s in segments)
     assert segments[0]["start"] == 0 and segments[-1]["end"] == 1
     assert all(a["end"] == b["start"] for a,b in zip(segments,segments[1:]))
+    assert [drawing["kind"] for drawing in result["drawings"]] == [
+        "statics", "trajectory", "elevation-a", "elevation-b",
+    ]
     for index,drawing in enumerate(result["drawings"]):
         payload, name = api.render(drawing["id"], "dxf")
         path = tmp_path/name
@@ -122,6 +125,9 @@ def test_mid_transfer_collision_and_exports(data, tmp_path):
         if index == 0:
             assert {"AG  6.00 m","BG  4.00 m","AB  10.00 m","A 钩高 6.00 m","B 钩高 6.00 m",
                     "车底离地  1.00 m","L  12.00 m","B=3.00 m","点位坐标 / m"} <= set(texts)
+        if index == 1:
+            assert {"P0 起吊", "吊点 A 路径", "吊点 B 路径", "车体形心路径"} <= set(texts)
+            assert len({doc.layers.get(layer).rgb for layer in ("TRACE_CENTER", "TRACE_A", "TRACE_B")}) == 3
         assert doc.header["$INSUNITS"] == 4 and len(doc.modelspace().query("TEXT")) >= 6
 
 
@@ -222,6 +228,10 @@ def test_unequal_measured_rises_reach_each_hook_check_and_sheet(data):
                for s in result["segments"])
     sheet = result["drawings"][0]["svg"]
     assert "A 钩高 5.75 m" in sheet and "B 钩高 7.00 m" in sheet
+    _, _, left, right = result["drawings"]
+    assert "吊点 A" in left["svg"] and "H=5.75 m" in left["svg"]
+    assert "吊点 B" in right["svg"] and "H=7.00 m" in right["svg"]
+    assert "吊物分载 6.40 t" in left["svg"] and "吊物分载 9.60 t" in right["svg"]
 
 def test_clearance_threshold_uses_station_edges(data):
     case = Transfer.model_validate(data["transfer"])

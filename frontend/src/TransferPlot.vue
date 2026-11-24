@@ -33,18 +33,28 @@ function play(){
 watch(()=>props.poses,()=>{stop();progress.value=0},{deep:true})
 onBeforeUnmount(stop)
 onDeactivated(stop)
-const position=computed(()=>{
-  const n=props.poses.length-1,t=progress.value*n,i=Math.min(n-1,Math.floor(t))
+function positionAt(at:number){
+  const n=props.poses.length-1,t=at*n,i=Math.min(n-1,Math.floor(t))
   return props.poses[i].map((v,k)=>v+(t-i)*(props.poses[i+1][k]-v))
-})
+}
+const position=computed(()=>positionAt(progress.value))
 const frames=computed(()=>{
   const end=props.poses.length-1
-  return [...new Set(Array.from({length:5},(_,i)=>Math.round(i*end/4)))]
+  return [...new Set([0,end])]
+})
+function lugAt([cx,cy,yaw]:number[], i:number){
+  const [u,v]=props.points[i]
+  const a=yaw*Math.PI/180
+  return [cx+u*Math.cos(a)-v*Math.sin(a),cy+u*Math.sin(a)+v*Math.cos(a)]
+}
+const hookPaths=computed(()=>{
+  if(!props.preview) return []
+  const intervals=(props.poses.length-1)*12
+  const samples=Array.from({length:intervals+1},(_,i)=>positionAt(i/intervals))
+  return props.cranes.map((_,i)=>samples.map(p=>lugAt(p,i)))
 })
 const hooks=computed(()=>props.cranes.map((crane,i)=>{
-  const [cx,cy,yaw]=position.value, [u,v]=props.points[i]
-  const a=yaw*Math.PI/180
-  const x=cx+u*Math.cos(a)-v*Math.sin(a), y=cy+u*Math.sin(a)+v*Math.cos(a)
+  const [x,y]=lugAt(position.value,i)
   const dx=x-crane.center[0],dy=y-crane.center[1]
   return {x,y,radius:Math.hypot(dx,dy),azimuth:Math.atan2(dy,dx)*180/Math.PI}
 }))
@@ -90,9 +100,12 @@ function locate(e:PointerEvent|MouseEvent){
 <figure><figcaption><b>{{site?'场地平面':'吊物顶面'}}</b><span>{{site?'场地坐标':'局部坐标'}} · m</span></figcaption>
 <svg viewBox="0 0 600 316" :class="{pick:!site}" :aria-label="site?'场地坐标图':'点选吊点与重心的局部坐标图'" @pointermove="!site && (hover=locate($event))" @pointerleave="hover=undefined" @click="e=>{const p=locate(e);if(!site && p)emit('place',p[0],p[1])}">
   <g class="grid"><path v-for="t in xt" :key="'x'+t.n" :d="'M'+t.px+' 18v280'"/><path v-for="t in yt" :key="'y'+t.n" :d="'M20 '+t.px+'h560'"/></g>
-  <g v-if="site" class="rails"><polyline v-for="(rail,i) in rails" :key="i" :points="poly(rail)"/>
-    <polyline v-if="preview" class="travel" :points="poly(poses)"/></g>
+  <g v-if="site" class="rails"><polyline v-for="(rail,i) in rails" :key="i" :points="poly(rail)"/></g>
   <polygon v-for="i in (site?frames:[0])" :key="i" :points="poly(bodies[i])" :class="['body',{end:i>0}]"/>
+  <g v-if="preview" class="paths">
+    <polyline v-for="(path,i) in hookPaths" :key="i" :class="i===0?'path-a':'path-b'" :points="poly(path)"/>
+    <polyline class="travel" :points="poly(poses)"/>
+  </g>
   <polygon v-if="preview" class="moving" :points="poly(outline(position))"/>
   <g class="axis"><path :d="'M18 '+Y(0)+'H582l-6 -3m6 3-6 3'"/><path :d="'M'+X(0)+' 299V15l-3 6m3 -6 3 6'"/></g>
   <g class="ticks"><text v-for="t in xt.filter(t=>t.n!==0)" :key="t.n" :x="t.px" y="308" text-anchor="middle">{{t.n}}</text><text v-for="t in yt.filter(t=>t.n!==0)" :key="t.n" x="4" :y="t.px+4">{{t.n}}</text>
@@ -110,25 +123,31 @@ function locate(e:PointerEvent|MouseEvent){
     <g v-if="preview" class="booms"><g v-for="(hook,i) in hooks" :key="i">
       <line :x1="X(cranes[i].center[0])" :y1="Y(cranes[i].center[1])" :x2="X(hook.x)" :y2="Y(hook.y)"/>
       <circle :cx="X(hook.x)" :cy="Y(hook.y)" r="3"/></g></g>
-    <text v-for="i in frames" :key="i" :x="X(poses[i][0])+5" :y="Y(poses[i][1])+16">P{{i}}</text>
+    <text v-for="i in frames" :key="i" class="endpoint" :x="X(poses[i][0])+7"
+          :y="Y(poses[i][1])+(i===0?18:-9)">P{{i}} {{i===0?'起吊':'落位'}}</text>
   </template>
 </svg>
 <div v-if="preview" class="playback"><button type="button" @click="play">{{playing?'暂停':'慢速预演'}}</button>
 <button v-if="criticalProgress!==undefined" type="button" @click="stop();progress=criticalProgress">定位净距限制区间</button>
 <label>路径进度 <input aria-label="路径进度" type="range" min="0" max="1" step=".001" v-model.number="progress" @input="stop"></label>
 <span>{{(progress*100).toFixed(0)}}% · {{position[2].toFixed(1)}}°</span></div>
-<p v-if="preview">{{hooks.map((h,i)=>'AB'[i]+' 机　幅度 '+h.radius.toFixed(2)+' m　方位 '+h.azimuth.toFixed(1)+'°').join('　｜　')}}</p>
+<template v-if="preview"><div class="path-key"><span class="travel">形心路径</span><span class="path-a">吊点 A 路径</span><span class="path-b">吊点 B 路径</span></div>
+<p>{{hooks.map((h,i)=>'AB'[i]+' 机　幅度 '+h.radius.toFixed(2)+' m　方位 '+h.azimuth.toFixed(1)+'°').join('　｜　')}}</p></template>
 <p v-if="site && provisional">虚线矩形为预排站位，规划后显示选定位置。</p>
 <p v-else>{{site?'P0 起吊，末点落位；矩形表示吊机占地，圆表示场地障碍。':hover?'X '+hover[0].toFixed(3)+' m　 Y '+hover[1].toFixed(3)+' m':'原点 O 在吊物形心，+X 沿车长，+Y 沿车宽。'}}</p></figure>
 </template>
 <style scoped>
-figure{margin:0;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--plot)}
+figure{--route:#006157;--path-a:#2650a6;--path-b:#a44a0e;margin:0;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--plot)}
+:root[data-theme=dark] figure{--route:#78d9c6;--path-a:#9bbdff;--path-b:#ffc28d}
 figcaption{padding:12px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line)}
 figcaption span,p{font-size:12px;color:var(--quiet)}p{padding:6px 14px;margin:0;border-top:1px solid var(--line)}
 svg{display:block;width:100%;height:auto}.pick{cursor:crosshair}
 .grid path{stroke:var(--line);stroke-width:.7}.axis path{stroke:var(--quiet);stroke-width:1.1;fill:none}
 text{font:13px 'Microsoft YaHei UI',sans-serif;fill:var(--ink)}.ticks text{font-size:11px;fill:var(--quiet)}
-.playback{display:flex;align-items:center;gap:8px;padding:8px 12px;flex-wrap:wrap}.playback label{display:flex;align-items:center;gap:6px;flex:1}.playback input{flex:1;min-width:60px}.playback span{font-size:12px}.moving{fill:var(--wash);stroke:var(--accent);stroke-width:3}.rails polyline{stroke:var(--quiet);stroke-width:1.4;fill:none}.rails .travel{stroke-dasharray:3 4}.body{fill:var(--wash);stroke:var(--accent);stroke-width:1.5}.end{stroke-dasharray:5 4;fill:none}
+.playback{display:flex;align-items:center;gap:8px;padding:8px 12px;flex-wrap:wrap}.playback label{display:flex;align-items:center;gap:6px;flex:1}.playback input{flex:1;min-width:60px}.playback span{font-size:12px}.moving{fill:var(--wash);stroke:var(--accent);stroke-width:3}.rails polyline{stroke:var(--quiet);stroke-width:1.4;fill:none}.body{fill:var(--wash);stroke:var(--accent);stroke-width:1.5}.end{stroke-dasharray:5 4;fill:none}
+.paths polyline{fill:none;stroke:currentColor;stroke-linejoin:round}.paths .travel{stroke-width:2.8}.paths .path-a,.paths .path-b{stroke-width:1.7}.paths .path-a{stroke-dasharray:7 4}.paths .path-b{stroke-dasharray:2 4}
+.travel{color:var(--route)}.path-a{color:var(--path-a)}.path-b{color:var(--path-b)}.endpoint{font-weight:700;paint-order:stroke;stroke:var(--plot);stroke-width:4}
+.path-key{display:flex;gap:7px 16px;flex-wrap:wrap;padding:4px 14px 9px;font-size:12px}.path-key span::before{display:inline-block;vertical-align:middle;width:17px;margin-right:5px;border-top:2px solid currentColor;content:''}.path-key .path-a::before{border-top-style:dashed}.path-key .path-b::before{border-top-style:dotted}
 .ab{stroke:var(--accent);stroke-dasharray:5 3;fill:none}.marker{color:var(--accent)}.cg{color:var(--warm)}
 .marker text{fill:currentColor;font-weight:700}.disk circle{stroke:var(--quiet);fill:none}.crane-box polygon{fill:var(--wash);stroke:var(--ink);stroke-width:1.6}.focus polygon{stroke:var(--accent);stroke-width:2;fill:var(--wash)}
 .provisional polygon{stroke-dasharray:5 3}.booms line{stroke:var(--warm);stroke-width:2}.booms circle{fill:var(--warm)}

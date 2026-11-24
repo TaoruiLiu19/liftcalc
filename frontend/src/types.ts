@@ -58,7 +58,7 @@ export type TransferResult = {
   clearance: { lower_m: number; pair: string; leg: number; start: number; end: number }
   poses: number[][]
   stations: {center: number[]; heading: number}[]
-  drawings: { id: string; svg: string }[]
+  drawings: { id: string; title: string; kind: 'statics' | 'trajectory' | 'elevation-a' | 'elevation-b'; svg: string }[]
   shares: number[]
   loads: number[]
   segments: { leg: number; start: number; end: number; radii: [number, number][]; ratios: (number | null)[]; unsafe: string[]; unknown: string[] }[]

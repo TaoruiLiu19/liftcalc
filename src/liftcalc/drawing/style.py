@@ -23,6 +23,10 @@ LAYER_RIGGING = "RIGGING"
 LAYER_CENTER = "CENTER"
 LAYER_TEXT = "TEXT"
 LAYER_NOTE = "NOTE"
+LAYER_TRACE_CENTER = "TRACE_CENTER"
+LAYER_TRACE_A = "TRACE_A"
+LAYER_TRACE_B = "TRACE_B"
+LAYER_TRACE_GATE = "TRACE_GATE"
 
 LAYERS = (
     LAYER_OUTLINE,
@@ -33,6 +37,10 @@ LAYERS = (
     LAYER_CENTER,
     LAYER_TEXT,
     LAYER_NOTE,
+    LAYER_TRACE_CENTER,
+    LAYER_TRACE_A,
+    LAYER_TRACE_B,
+    LAYER_TRACE_GATE,
 )
 
 #: 屏幕/位图颜色（RGB）
@@ -45,6 +53,10 @@ COLORS_RGB: dict[str, tuple[int, int, int]] = {
     LAYER_CENTER: (200, 30, 30),    # 红
     LAYER_TEXT: (17, 17, 17),
     LAYER_NOTE: (105, 105, 105),
+    LAYER_TRACE_CENTER: (0, 97, 87),
+    LAYER_TRACE_A: (38, 80, 166),
+    LAYER_TRACE_B: (164, 74, 14),
+    LAYER_TRACE_GATE: (115, 55, 132),
 }
 
 #: CAD 索引色（ACI）
@@ -57,6 +69,10 @@ COLORS_ACI: dict[str, int] = {
     LAYER_CENTER: 1,
     LAYER_TEXT: 7,
     LAYER_NOTE: 8,
+    LAYER_TRACE_CENTER: 4,
+    LAYER_TRACE_A: 5,
+    LAYER_TRACE_B: 30,
+    LAYER_TRACE_GATE: 6,
 }
 
 #: 线宽（mm）——同时用于 SVG / PNG / DXF(线宽表取最近档)
@@ -69,6 +85,10 @@ LINEWEIGHT_MM: dict[str, float] = {
     LAYER_CENTER: 0.18,
     LAYER_TEXT: 0.25,
     LAYER_NOTE: 0.18,
+    LAYER_TRACE_CENTER: 0.75,
+    LAYER_TRACE_A: 0.42,
+    LAYER_TRACE_B: 0.42,
+    LAYER_TRACE_GATE: 0.45,
 }
 
 #: DXF 允许的线宽档位（1/100 mm）

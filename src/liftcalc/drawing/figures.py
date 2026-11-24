@@ -20,6 +20,12 @@ from liftcalc.drawing import dim as D
 from liftcalc.drawing import sheet as S
 from liftcalc.drawing.body import (
     BODY_MODEL_FRONT,
+    CAB_LEFT_EDGE,
+    CAB_RIGHT_EDGE,
+    CAB_ROOF_HEIGHT,
+    DECK_HEIGHT,
+    MAIN_WINCH,
+    MAIN_WINCH_RADIUS,
     draw_truck,
     drawing_axles,
 )
@@ -54,11 +60,12 @@ HINGE_H = 4.7
 BOOM_HALF_FOOT = 0.80     # 臂根半宽
 BOOM_HALF_TIP = 0.58      # 臂端半宽
 BOOM_JOINTS = (0.30, 0.52, 0.72, 0.88)   # 伸缩节搭接位置（占臂长比例）
+BOOM_HEAD_REACH = 0.65   # 立面示意：臂架轴线端点到吊钩铅垂线的水平偏距
 BODY_FRONT = BODY_MODEL_FRONT   # 车头前沿距回转中心（车身标定见 drawing/body.py）
-BLOCK_W = 0.90            # 吊钩组筒体宽
 BLOCK_H = 2.40            # 吊钩组筒体高
 BLOCK_GAP = 0.40          # 筒体底到吊钩中心
-ROPE_OFFSET = .22
+LIFT_SHEAVE_RADIUS = .28
+GUIDE_SHEAVE_RADIUS = .22
 SLING_RATIO = 0.55        # 吊索水平投影 → 竖直高度
 ROPE_MIN = 1.6            # 无起升高度数据时，吊钩组顶距臂端的最小绳长
 DEFAULT_LOAD_W = 3.2
@@ -248,7 +255,7 @@ class ElevationModel:
 
     @property
     def hinge(self) -> tuple[float, float]:
-        return self.radius - self.boom_len * math.cos(self.rad), HINGE_H
+        return self.tip[0] - self.boom_len * math.cos(self.rad), HINGE_H
 
     @property
     def hook_seat(self) -> tuple[float, float]:
@@ -256,11 +263,23 @@ class ElevationModel:
 
     @property
     def tip(self) -> tuple[float, float]:
-        return self.radius, HINGE_H + self.boom_len * math.sin(self.rad)
+        return self.radius - BOOM_HEAD_REACH, self.tip_height
+
+    @property
+    def head_sheave(self) -> tuple[float, float]:
+        return self.radius, self.tip_height
+
+    @property
+    def guide_sheave(self) -> tuple[float, float]:
+        return self.tip[0] - .25, self.tip_height + .47
 
     @property
     def block_top(self) -> float:
         return self.hook_h + BLOCK_GAP + BLOCK_H
+
+    @property
+    def block_sheave(self) -> tuple[float, float]:
+        return self.radius, self.block_top - .66
 
     @property
     def sling_drop(self) -> float:
@@ -276,7 +295,7 @@ class ElevationModel:
 
     @property
     def tip_height(self) -> float:
-        return self.tip[1]
+        return HINGE_H + self.boom_len * math.sin(self.rad)
 
     @property
     def lug_x(self) -> float:
@@ -421,46 +440,68 @@ def _draw_boom(figure: Figure, paper: _Paper, model: ElevationModel) -> None:
 
     pin(along(0, 0), .26)
     pin(along(0, 0), .11)
-    length = model.boom_len
-    profile(((length - .70, .32), (length - .22, .49), (length + .26, .34),
-             (length + .37, -.12), (length + .15, -.41), (length - .68, -.32)))
-    pin(paper(*model.tip), ROPE_OFFSET)
-    pin(paper(*model.tip), .085)
+    tx, ty = model.tip
+    # 参照徐工 QY70K-I 操作手册图 2-1 和图 5-18，分画臂头导向轮和定滑轮。
+    head_outline = ((-.55, -.57), (-.58, .51), (-.32, .80), (.14, .75),
+                    (.95, .24), (1.03, -.08), (.91, -.52), (.61, -.70),
+                    (.25, -.73), (.12, -.57))
+    figure.add(Polyline(tuple(paper(tx + x, ty + y) for x, y in head_outline), True, LAYER_OUTLINE))
+    for center, radius in ((model.guide_sheave, GUIDE_SHEAVE_RADIUS), (model.head_sheave, LIFT_SHEAVE_RADIUS)):
+        pin(paper(*center), radius)
+        pin(paper(*center), .085)
+
+
+def _draw_luffing_cylinder(figure: Figure, paper: _Paper, model: ElevationModel) -> None:
+    hx, hy = model.hinge
+    cosine, sine = math.cos(model.rad), math.sin(model.rad)
+
+    def on_boom(distance: float, normal: float) -> tuple[float, float]:
+        return hx + cosine * distance - sine * normal, hy + sine * distance + cosine * normal
+
+    distance = min(6.2, model.boom_len * .27)
+    upper = on_boom(distance, -1.04)
+    base = (1.63, DECK_HEIGHT)
+    length = math.dist(base, upper)
+    ux, uy = (upper[0] - base[0]) / length, (upper[1] - base[1]) / length
+
+    def cylinder(s: float, offset: float) -> tuple[float, float]:
+        return paper(base[0] + ux*s - uy*offset, base[1] + uy*s + ux*offset)
+
+    # 下铰点在操纵室后方，筒体从屋顶或侧缘露出。
+    roof_exit = (CAB_ROOF_HEIGHT - base[1]) / uy if uy > 0 else math.inf
+    cab_edge = CAB_LEFT_EDGE if ux >= 0 else CAB_RIGHT_EDGE
+    side_exit = (cab_edge - base[0]) / ux if abs(ux) > 1e-9 else math.inf
+    visible = min(roof_exit, side_exit)
+    end = length - .14
+    if visible < end:
+        collar = visible + .57 * (end - visible)
+        figure.add(
+            Polyline((cylinder(visible, -.19), cylinder(collar, -.19), cylinder(collar, .19),
+                      cylinder(visible, .19)), False, LAYER_OUTLINE),
+            Polyline((cylinder(collar, -.10), cylinder(end, -.10), cylinder(end, .10),
+                      cylinder(collar, .10)), False, LAYER_OUTLINE),
+        )
+        target = cylinder((visible + collar) / 2, .19)
+        D.leader(figure, target, (target[0] - 6, target[1] + 5), "变幅油缸", align=ALIGN_RIGHT, height=2.6)
+
+    lug = (on_boom(max(0, distance - .34), -BOOM_HALF_FOOT),
+           on_boom(distance + .34, -BOOM_HALF_FOOT), upper)
+    figure.add(Polyline(tuple(paper(*p) for p in lug), True, LAYER_OUTLINE),
+               Circle(*paper(*upper), .15 * paper.s, LAYER_OUTLINE),
+               Circle(*paper(*upper), .055 * paper.s, LAYER_THIN))
 
 
 def _draw_hook_block(figure: Figure, paper: _Paper, model: ElevationModel) -> None:
     x = model.radius
     bottom = model.hook_h + BLOCK_GAP
     top = bottom + BLOCK_H
-    half = BLOCK_W / 2.0
-    r = min(half * 0.9, 0.25)
-
-    outline: list[tuple[float, float]] = [(x - half, bottom + r)]
-    for index in range(1, 9):                        # 左下圆角
-        ang = math.radians(180 + 90 * index / 8)
-        outline.append((x - half + r + r * math.cos(ang), bottom + r + r * math.sin(ang)))
-    outline.append((x + half - r, bottom))
-    for index in range(1, 9):                        # 右下圆角
-        ang = math.radians(270 + 90 * index / 8)
-        outline.append((x + half - r + r * math.cos(ang), bottom + r + r * math.sin(ang)))
-    outline.append((x + half, top - r))
-    for index in range(1, 9):                        # 右上圆角
-        ang = math.radians(0 + 90 * index / 8)
-        outline.append((x + half - r + r * math.cos(ang), top - r + r * math.sin(ang)))
-    outline.append((x - half + r, top))
-    for index in range(1, 9):                        # 左上圆角
-        ang = math.radians(90 + 90 * index / 8)
-        outline.append((x - half + r + r * math.cos(ang), top - r + r * math.sin(ang)))
-    figure.add(Polyline(points=tuple(paper(*p) for p in outline), closed=True,
-                        layer=LAYER_OUTLINE))
-
-    # 筒内滑轮
-    figure.add(Circle(cx=paper(x, top - 0.85)[0], cy=paper(x, top - 0.85)[1],
-                      r=0.28 * paper.s, layer=LAYER_OUTLINE))
-    # 筒底横梁
-    figure.add(Line(x1=paper(x - half, bottom + 0.18)[0], y1=paper(x - half, bottom + 0.18)[1],
-                    x2=paper(x + half, bottom + 0.18)[0], y2=paper(x + half, bottom + 0.18)[1],
-                    layer=LAYER_THIN))
+    outline = ((-.22, bottom), (-.44, bottom + .42), (-.47, top - .17), (-.35, top),
+               (.35, top), (.47, top - .17), (.44, bottom + .42), (.22, bottom))
+    center = paper(*model.block_sheave)
+    figure.add(Polyline(tuple(paper(x + dx, y) for dx, y in outline), True, LAYER_OUTLINE),
+               Circle(*center, LIFT_SHEAVE_RADIUS * paper.s, LAYER_OUTLINE),
+               Circle(*center, .08 * paper.s, LAYER_THIN),
+               Line(*paper(x - .29, bottom + .16), *paper(x + .29, bottom + .16), LAYER_THIN))
 
     seat_x, seat_y = model.hook_seat
     hook = ((-.08, BLOCK_GAP), (-.08, .33), (-.20, .24), (-.25, .11),
@@ -472,11 +513,85 @@ def _draw_hook_block(figure: Figure, paper: _Paper, model: ElevationModel) -> No
                         True, LAYER_OUTLINE))
 
 
+def _rope_behind_boom(model: ElevationModel, start: tuple[float, float],
+                      end: tuple[float, float]) -> list[tuple[float, float]]:
+    """求入绳段在侧视投影中被各节臂遮住的参数范围。"""
+    hx, hy = model.hinge
+    c, s = math.cos(model.rad), math.sin(model.rad)
+    x, y = start[0] - hx, start[1] - hy
+    dx, dy = end[0] - start[0], end[1] - start[1]
+    along, normal = x*c + y*s, -x*s + y*c
+    du, dv = dx*c + dy*s, -dx*s + dy*c
+
+    def inside(value: float, delta: float, low: float, high: float) -> tuple[float, float]:
+        if abs(delta) < 1e-9:
+            return (0, 1) if low <= value <= high else (1, 0)
+        a, b = (low - value) / delta, (high - value) / delta
+        return min(a, b), max(a, b)
+
+    ranges = []
+    stops = (0.0, *BOOM_JOINTS, 1.0)
+    for near, far in zip(stops, stops[1:]):
+        half = _boom_half(near)
+        u0, u1 = inside(along, du, near * model.boom_len, far * model.boom_len)
+        v0, v1 = inside(normal, dv, -half, half)
+        left, right = max(u0, v0, 0), min(u1, v1, 1)
+        if left < right:
+            ranges.append((left, right))
+    return ranges
+
+
 def _draw_rope(figure: Figure, paper: _Paper, model: ElevationModel) -> None:
-    for offset in (-ROPE_OFFSET, ROPE_OFFSET):
-        horizontal = model.tip[0] + offset
-        figure.add(Line(*paper(horizontal, model.tip_height),
-                        *paper(horizontal, model.block_top), LAYER_OUTLINE))
+    """沿切线和轮缘绘制起升绳的侧视投影。"""
+    guide, head, block = model.guide_sheave, model.head_sheave, model.block_sheave
+    r = LIFT_SHEAVE_RADIUS
+
+    def tangent(first: tuple[float, float], r1: float, second: tuple[float, float], r2: float) -> float:
+        angle = math.atan2(second[1] - first[1], second[0] - first[0])
+        return angle + math.acos((r1 - r2) / math.dist(first, second))
+
+    def rim(center: tuple[float, float], radius: float, angle: float) -> tuple[float, float]:
+        return center[0] + radius * math.cos(angle), center[1] + radius * math.sin(angle)
+
+    def wrap(center: tuple[float, float], radius: float, start: float, end: float):
+        return tuple(paper(*rim(center, radius, start + (end - start) * i / 24)) for i in range(25))
+
+    incoming = tangent(MAIN_WINCH, MAIN_WINCH_RADIUS, guide, GUIDE_SHEAVE_RADIUS)
+    outgoing = tangent(guide, GUIDE_SHEAVE_RADIUS, head, r)
+    feed = rim(MAIN_WINCH, MAIN_WINCH_RADIUS, incoming)
+    contact = rim(guide, GUIDE_SHEAVE_RADIUS, incoming)
+
+    def lead_at(t: float) -> tuple[float, float]:
+        return paper(feed[0] + t * (contact[0] - feed[0]), feed[1] + t * (contact[1] - feed[1]))
+
+    # 引线接点同时划分长斜线，避免整段外包框误挤右上性能表。
+    marker = .26
+    hidden = _rope_behind_boom(model, feed, contact)
+    cuts = sorted({0.0, marker, 1.0, *(t for span in hidden for t in span)})
+    for first, last in zip(cuts, cuts[1:]):
+        a, b = lead_at(first), lead_at(last)
+        mid = (first + last) / 2
+        if any(lo < mid < hi for lo, hi in hidden):
+            D.dashed(figure, a, b, dash=1.7, gap=1.2, layer=LAYER_RIGGING)
+        else:
+            figure.add(Line(*a, *b, LAYER_RIGGING))
+
+    anchor = (head[0] - r, head[1] - .61)
+    guide_arc = wrap(guide, GUIDE_SHEAVE_RADIUS, incoming, outgoing)
+    head_arc = wrap(head, r, outgoing, 0)
+    block_arc = wrap(block, r, 0, -math.pi)
+    figure.add(
+        Polyline(guide_arc, False, LAYER_RIGGING),
+        Line(*guide_arc[-1], *head_arc[0], LAYER_RIGGING),
+        Polyline(head_arc, False, LAYER_RIGGING),
+        Line(*head_arc[-1], *block_arc[0], LAYER_RIGGING),
+        Polyline(block_arc, False, LAYER_RIGGING),
+        Line(*block_arc[-1], *paper(*anchor), LAYER_RIGGING),
+        Line(*paper(anchor[0] - .09, anchor[1]), *paper(anchor[0] + .09, anchor[1]), LAYER_OUTLINE),
+    )
+
+    target = lead_at(marker)
+    D.leader(figure, target, (target[0] + 8, target[1] + 6), "起升钢丝绳", height=2.6, dot=False)
 
 
 def centroid_symbol(figure: Figure, paper: _Paper, x: float, y: float,
@@ -536,7 +651,7 @@ def _draw_dimensions(figure: Figure, paper: _Paper, model: ElevationModel,
     x_left = paper(center_x + model.load_w / 2.0, 0.0)[0]   # 吊物远边（图左）
     ground = paper.oy
     hook_x, hook_y = paper(model.radius, model.hook_h)
-    tip_x, tip_y = paper(*model.tip)
+    tip_x, tip_y = paper(*model.head_sheave)
     load_bottom_y = paper(0.0, model.load_bottom)[1]
     load_top_y = paper(0.0, model.load_top)[1]
 
@@ -613,6 +728,12 @@ def _draw_markers(figure: Figure, paper: _Paper, model: ElevationModel) -> None:
     D.leader(figure, (hook_x, hook_y),
              (hook_x - 9.0, hook_y + 3.4), "吊钩中心", align=ALIGN_RIGHT)
 
+    head_x, head_y = paper(*model.head_sheave)
+    D.leader(figure, (head_x, head_y), (head_x - 7, head_y + 10), "臂头滑轮组",
+             align=ALIGN_RIGHT, height=2.6)
+    winch_x, winch_y = paper(*MAIN_WINCH)
+    D.leader(figure, (winch_x, winch_y), (winch_x + 9, winch_y + 7), "主卷扬", height=2.6)
+
     # 主臂：文字在臂上侧，引线指向臂中段
     mid = 0.55
     rad = model.rad
@@ -630,14 +751,15 @@ def _draw_markers(figure: Figure, paper: _Paper, model: ElevationModel) -> None:
 
 
 def _geometry(model: ElevationModel, scale: float, derived_angle: bool,
-              axles: int | None) -> Figure:
+              axles: int | None, model_name: str) -> Figure:
     """只画立面几何（不含图框/标题栏/表格），用于按实际外包框排版。"""
     canvas = Figure(title="", width=0.0, height=0.0)
     paper = _Paper(scale=scale, ox=0.0, oy=0.0)
-    draw_truck(canvas, paper, axles, model.hinge)
+    draw_truck(canvas, paper, axles, model.hinge, model_name)
     _draw_boom(canvas, paper, model)
-    _draw_rope(canvas, paper, model)
+    _draw_luffing_cylinder(canvas, paper, model)
     _draw_hook_block(canvas, paper, model)
+    _draw_rope(canvas, paper, model)
     _draw_load(canvas, paper, model)
     _draw_dimensions(canvas, paper, model, derived_angle=derived_angle)
     _draw_markers(canvas, paper, model)
@@ -704,6 +826,7 @@ def _build_sheet_view(model: ElevationModel, model_notes: list[str],
     """在给定图幅上排一次版并出图。"""
     derived_angle = detail.get("boom_angle") is None
     load = load or {}
+    model_name = str(detail.get("model") or cap.get("model") or "")
 
     # ---- 版面：家具位置固定，几何按实际外包框选比例并居中 -----------------
     x0, y0, x1, y1 = sheet.content
@@ -732,7 +855,7 @@ def _build_sheet_view(model: ElevationModel, model_notes: list[str],
     chosen = None
     for denom_value in SCALE_LADDER:
         scale = 1000.0 / denom_value
-        geometry = _geometry(model, scale, derived_angle, axles)
+        geometry = _geometry(model, scale, derived_angle, axles, model_name)
         bx0, by0, bx1, by1 = geometry.bbox()
         width, height = bx1 - bx0, by1 - by0
         if width > area_w + slack or height > area_h + slack:
@@ -747,7 +870,7 @@ def _build_sheet_view(model: ElevationModel, model_notes: list[str],
     if chosen is None:                                   # 最大一档也放不下：取最小比例
         denom_value = SCALE_LADDER[-1]
         scale = 1000.0 / denom_value
-        geometry = _geometry(model, scale, derived_angle, axles)
+        geometry = _geometry(model, scale, derived_angle, axles, model_name)
         bx0, by0, bx1, by1 = geometry.bbox()
         dx = area[0] - bx0
         dy = area[1] - by0
@@ -768,7 +891,7 @@ def _build_sheet_view(model: ElevationModel, model_notes: list[str],
     # ---- 性能表 ----------------------------------------------------------
     rated_lift = detail.get("lift_height")
     rows: list[tuple[str, str]] = [
-        ("机型", str(detail.get("model") or cap.get("model") or "")),
+        ("机型", model_name),
         ("臂长 L", f"{model.boom_len:.2f} m"),
         ("幅度 R", f"{model.radius:g} m"),
         ("仰角 a", f"{model.boom_angle:.1f}°"),
@@ -825,7 +948,7 @@ def _build_sheet_view(model: ElevationModel, model_notes: list[str],
     S.title_block(
         figure, sheet,
         title="吊装立面图",
-        subtitle=str(detail.get("model") or cap.get("model") or ""),
+        subtitle=model_name,
         scale_text=f"1:{denom_value}",
         drawing_no="LC-01",
         project="吊装能力反查",
