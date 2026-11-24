@@ -100,10 +100,13 @@ class DesktopApi:
             inputs, result = plan_transfer(inputs, self._repo)
             drawings = sheets(inputs, result)
             tokens = [uuid.uuid4().hex for _ in drawings]
+            previews = [dict(id=token, title=sheet.title, kind=sheet.meta["kind"], svg=to_svg(sheet, margin=0))
+                        for token, sheet in zip(tokens, drawings, strict=True)]
             with self._lock:
-                self._transfer_sheets = dict(zip(tokens, drawings))
-            return {**result, "poses": inputs.route, "stations": [dict(center=c.center, heading=c.heading) for c in inputs.cranes], "drawings": [{"id": token, "svg": to_svg(sheet, margin=0)}
-                                            for token, sheet in zip(tokens, drawings)]}
+                self._transfer_sheets = dict(zip(tokens, drawings, strict=True))
+            return {**result, "poses": inputs.route,
+                    "stations": [dict(center=c.center, heading=c.heading) for c in inputs.cranes],
+                    "drawings": previews}
         if case.get("kind") != "crane.capability" or case.get("mode", "single") != "single":
             raise ValueError("此工作台仅支持单机")
         if not 0 < float(case.get("limit", .9)) <= 1 or not float(case["payload"]) > 0:

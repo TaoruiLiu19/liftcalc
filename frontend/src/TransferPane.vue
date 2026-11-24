@@ -17,8 +17,11 @@ const form = reactive({
     verified_height: null as number|null, radius_limit: null as number|null})),
   obstacles: [] as number[][],
 })
-const active = ref(0), pick = ref(0), busy = ref(false), error = ref('')
+const activeSheet = ref(''), pick = ref(0), busy = ref(false), error = ref('')
 const result = ref<TransferResult>(), viewer = ref<InstanceType<typeof SheetViewer>>()
+const drawings = computed(() => [...(result.value?.drawings ?? [])].sort(
+  (a,b) => Number(b.kind==='trajectory') - Number(a.kind==='trajectory'),
+))
 const peakIntervals = computed(() => result.value ? [0,1].map(i =>
   result.value!.segments.reduce((peak,s) => s.radii[i][1] > peak.radii[i][1] ? s : peak)
 ) : [])
@@ -136,18 +139,17 @@ async function calculate() {
       return {...c,sling_height:riggingRise(sling,form.height), ...(form.auto_stations?{}:{center,heading}), radius_limit:c.radius_limit || null,verified_height:c.verified_height || null,model:m.model,brand:m.brand,config:m.config}
     })
     const data=await window.pywebview!.api.calculate({kind:'rail.transfer',transfer:{...form,cranes}})
-    if(id===revision){result.value=data;active.value=0;goto(4)}
+    if(id===revision){result.value=data;activeSheet.value='';goto(4)}
   } catch(e){if(id===revision) error.value=String(e)}
   finally {busy.value=false}
 }
-async function openSheet(i:number){
-  active.value=i
+async function openSheet(svg:string){
+  activeSheet.value=svg
   await nextTick()
   viewer.value?.open()
 }
-async function save(i:number){
-  if(!result.value) return
-  try {await window.pywebview!.api.export(result.value.drawings[i].id,'dxf')}
+async function save(id:string){
+  try {await window.pywebview!.api.export(id,'dxf')}
   catch(e){error.value=String(e)}
 }
 const sizeFields = {length:'长 / m', width:'宽 / m', height:'高 / m', mass:'质量 / t'} as const
@@ -250,12 +252,12 @@ const craneLabels=['臂投影包络半宽 / m','主钩自重 / t','主钩额载 
       <p v-if="verdict!=='pass'" class="muted">以下为几何候选路径，仍有超限或待核项。</p>
       <p>A / B 全程峰值幅度上界　{{peakIntervals.map((s,i)=>(Math.ceil(100*s.radii[i][1])/100).toFixed(2)).join(' / ')}} m</p>
       <div class="sheets">
-        <section v-for="(d,i) in result.drawings" :key="d.id" class="block">
-          <header><h3>{{i===0?'静力分析':'俯视转向轨迹'}}</h3><button @click="save(i)">导出 DXF</button></header>
-          <div class="paper"><button class="sheet-open" :aria-label="i===0?'放大静力分析图':'放大轨迹图'" @click="openSheet(i)" v-html="d.svg"></button></div>
+        <section v-for="d in drawings" :key="d.id" class="block" :class="{trajectory:d.kind==='trajectory'}">
+          <header><h3>{{d.title}}</h3><button @click="save(d.id)">导出 DXF</button></header>
+          <div class="paper"><button class="sheet-open" :aria-label="'放大'+d.title" @click="openSheet(d.svg)" v-html="d.svg"></button></div>
         </section>
       </div>
-      <SheetViewer ref="viewer" :svg="result.drawings[active].svg"/>
+      <SheetViewer ref="viewer" :svg="activeSheet"/>
       <div class="columns result-layout">
       <details class="block"><summary>自动规划的站位与调姿 · {{result.poses.length-1}} 段</summary>
         <p>全程平面净距下界 ≥ {{(Math.floor(result.clearance.lower_m*1000)/1000).toFixed(3)}} m · {{result.clearance.pair}}</p>
@@ -297,6 +299,7 @@ h3{font-size:15px;margin:0 0 10px}.block{padding:15px;border-radius:12px;border:
 .point-editor.invalid{border-color:var(--danger)}
 .decision{justify-content:space-between;background:var(--wash);flex-wrap:wrap}.decision[data-status=pending],[data-status=pending]{color:var(--warm)}
 .sheets{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,350px),1fr));gap:12px;margin-top:12px}.sheets .block{padding:10px}.sheets header{display:flex;align-items:center;justify-content:space-between}.sheets h3{margin:0}.sheets .paper{height:auto;aspect-ratio:420/297;padding:2px}.sheets .sheet-open{display:block}.result-layout{grid-template-columns:minmax(0,1.7fr) minmax(230px,1fr)}.paper{height:clamp(250px,49vh,580px);margin-top:12px}
+.sheets .trajectory{grid-column:1/-1}.sheets .trajectory .paper{aspect-ratio:auto;height:clamp(300px,56vh,740px)}
 .pose-tools{display:flex;gap:8px;margin-top:8px}.obstacle{padding-bottom:12px}.transfer-output nav{flex-wrap:wrap}.muted{color:var(--quiet)}
 @media(max-width:920px){.columns{grid-template-columns:1fr}.four{grid-template-columns:1fr 1fr}}
 @media(max-width:680px){.workflow{display:flex;flex-direction:column;gap:8px}.workflow-nav{width:100%}.workflow-nav h2{display:none}.steps{flex-direction:row;flex-wrap:wrap}.steps li{flex:auto}}

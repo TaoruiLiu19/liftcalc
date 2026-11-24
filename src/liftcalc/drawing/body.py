@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import csv
+import math
 from functools import lru_cache
 from pathlib import Path
 
@@ -25,6 +26,12 @@ MODEL_REAR = 3.45                      # 车尾（参考图 x=64 px）距回转�
 BODY_MODEL_FRONT = TRACE_M - MODEL_REAR  # 车头前沿距回转中心 = 9.55 m
 GROUND_PX = 328.0                      # 参考图上地面线的 y
 WHEEL_R = 0.64                         # 轮胎半径（按参考图轮拱约 1.28 m 直径）
+DECK_HEIGHT = (GROUND_PX - 150) / PX_PER_M
+CAB_ROOF_HEIGHT = (GROUND_PX - 77) / PX_PER_M
+CAB_LEFT_EDGE = MODEL_REAR - (165 - 64) / PX_PER_M
+CAB_RIGHT_EDGE = MODEL_REAR - (273 - 64) / PX_PER_M
+MAIN_WINCH = (-2.31, 3.02)              # 立面示意坐标 (m)
+MAIN_WINCH_RADIUS = .30
 
 # 每个轴数的轴距范围（参考图 px），取够放下 n 个 1.28 m 轮胎且不互相盖住
 AXLE_SPANS = {3: (209.0, 620.0), 4: (209.0, 726.0), 5: (209.0, 726.0),
@@ -55,10 +62,14 @@ def drawing_axles(cap: dict, detail: dict, brand: str) -> int | None:
     return _catalog_axles().get((brand, detail.get("model") or cap.get("model")))
 
 
-def axle_stations(count: int | None) -> tuple[float, ...]:
-    """按轴数在参考图上均布轴位（单位：参考图 px）。"""
+def axle_stations(count: int | None, model_name: str = "") -> tuple[float, ...]:
+    """按轴数布置轴位，单位为参考图 px。"""
     if not count:
         return ()
+    if count == 4 and model_name == "QY70K-1":
+        # 徐工操作手册图 3-1，按车尾到车头换算轴距比例。
+        wheelbase = (0.0, 1.350, 5.455, 6.925)
+        return tuple(254.0 + 564.0 * offset / wheelbase[-1] for offset in wheelbase)
     low, high = AXLE_SPANS.get(count, AXLE_SPANS[DEFAULT_AXLES])
     if count == 1:
         return (low,)
@@ -66,7 +77,8 @@ def axle_stations(count: int | None) -> tuple[float, ...]:
     return tuple(low + step * index for index in range(count))
 
 
-def draw_truck(figure: Figure, paper, axles: int | None, hinge: tuple[float, float]) -> None:
+def draw_truck(figure: Figure, paper, axles: int | None, hinge: tuple[float, float],
+               model_name: str = "") -> None:
     """按参考图描点画车身；轮胎用真实圆，半径不随轴数变化。"""
 
     def point(horizontal: float, vertical: float) -> tuple[float, float]:
@@ -87,7 +99,7 @@ def draw_truck(figure: Figure, paper, axles: int | None, hinge: tuple[float, flo
         contour(((left, top), (right, top), (right, bottom), (left, bottom)), fine=fine)
 
     # 正投影：底盘梁高于轮胎，轮罩按实际绘制的轴位留空。
-    stations = axle_stations(axles or DEFAULT_AXLES)
+    stations = axle_stations(axles or DEFAULT_AXLES, model_name)
     panel(68, 194, 910, 216, False)
     detail((72, 202), (894, 202))
     contour(((68, 216), (135, 216), (135, 246), (117, 258), (68, 258)))
@@ -126,24 +138,37 @@ def draw_truck(figure: Figure, paper, axles: int | None, hinge: tuple[float, flo
 
     # 回转支承、上车底架和配重分层；臂根耳板直接落在上车底架上。
     panel(252, 186, 446, 194, False)
-    contour(((165, 182), (165, 157), (182, 150), (527, 150),
+    contour(((165, 182), (165, 150), (527, 150),
              (548, 157), (675, 157), (675, 186), (208, 186)))
+    left_foot, right_foot = (.27, DECK_HEIGHT), (-2.08, DECK_HEIGHT)
     hx, hy = hinge
-    pedestal = (paper(hx + .65, (GROUND_PX - 150) / PX_PER_M),
-                paper(hx + .60, hy - .62), paper(hx + .40, hy + .08),
-                paper(hx + .17, hy + .32), paper(hx - .18, hy + .32),
-                paper(hx - .46, hy + .03), paper(hx - .55, hy - .55),
-                paper(hx - 1.35, (GROUND_PX - 150) / PX_PER_M))
-    figure.add(Polyline(pedestal, True, LAYER_OUTLINE))
-    contour(((467, 150), (467, 113), (477, 105), (545, 105),
-             (553, 113), (553, 150)))
-    for level in (118, 131, 143):
-        detail((470, level), (550, level))
+    head_radius = .50
 
-    # 上车操纵室位于主臂座靠车头的一侧，窗框、门线与室体一起前移。
-    contour(((560, 157), (558, 128), (574, 92), (581, 87),
-             (638, 84), (647, 89), (666, 138), (660, 157)))
-    contour(((565, 133), (581, 96), (605, 94), (605, 132)), fine=True)
-    contour(((614, 94), (636, 92), (652, 130), (614, 132)), fine=True)
-    detail((562, 146), (658, 139))
-    detail((613, 139), (613, 152), (652, 152))
+    def tangent_angle(foot: tuple[float, float], side: int) -> float:
+        down = math.atan2(foot[1] - hy, foot[0] - hx)
+        return down + side * math.acos(head_radius / math.dist(hinge, foot))
+
+    start = tangent_angle(left_foot, 1)
+    sweep = (tangent_angle(right_foot, -1) - start) % math.tau
+    angles = (start + sweep * step / 24 for step in range(25))
+    head = tuple(paper(hx + head_radius * math.cos(a), hy + head_radius * math.sin(a)) for a in angles)
+    pedestal = (paper(*left_foot), *head, paper(*right_foot))
+    figure.add(Polyline(pedestal, True, LAYER_OUTLINE))
+    contour(((570, 157), (570, 131), (582, 122), (650, 122), (667, 132), (667, 157)))
+    for level in (137, 146):
+        detail((573, level), (665, level))
+
+    # 主、副卷扬位于臂根外侧，操纵室位于平台左端。
+    winch_frame = ((-2.08, DECK_HEIGHT), (-1.96, 3.27), (-2.12, 3.43),
+                   (-3.29, 3.43), (-3.47, 3.25), (-3.47, (GROUND_PX - 157) / PX_PER_M))
+    figure.add(Polyline(tuple(paper(*p) for p in winch_frame), False, LAYER_OUTLINE))
+    for center, radius in ((MAIN_WINCH, MAIN_WINCH_RADIUS), ((-3.08, 3.02), .26)):
+        figure.add(Circle(*paper(*center), radius * paper.s, LAYER_OUTLINE),
+                   Circle(*paper(*center), .07 * paper.s, LAYER_THIN))
+
+    contour(((167, 150), (165, 121), (174, 99), (188, 80),
+             (224, 77), (245, 80), (254, 87), (273, 131), (267, 150)))
+    contour(((172, 126), (181, 100), (191, 89), (212, 87), (212, 125)), fine=True)
+    contour(((221, 87), (242, 86), (249, 92), (259, 123), (221, 125)), fine=True)
+    detail((169, 139), (265, 132))
+    detail((220, 132), (220, 145), (259, 145))

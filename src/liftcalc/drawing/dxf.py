@@ -18,7 +18,7 @@ from liftcalc.drawing.primitives import (
     Polyline,
     Text,
 )
-from liftcalc.drawing.style import COLORS_ACI, LAYERS, dxf_lineweight
+from liftcalc.drawing.style import COLORS_ACI, COLORS_RGB, LAYERS, dxf_lineweight
 
 
 def _alignment(align: str):
@@ -46,8 +46,10 @@ def to_dxf(figure: Figure, out_path: Path) -> Path:
 
     for layer in LAYERS:
         if layer not in doc.layers:
-            doc.layers.add(name=layer, color=COLORS_ACI.get(layer, 7),
-                           lineweight=dxf_lineweight(layer))
+            record = doc.layers.add(name=layer, color=COLORS_ACI.get(layer, 7),
+                                    lineweight=dxf_lineweight(layer))
+            if layer.startswith("TRACE_"):
+                record.rgb = COLORS_RGB[layer]
 
     modelspace = doc.modelspace()
     for item in figure.primitives:
