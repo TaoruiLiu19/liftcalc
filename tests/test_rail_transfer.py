@@ -206,9 +206,26 @@ def test_one_metre_gap_with_locked_stations():
     data = json.loads((ROOT/"cases/rail-transfer-1m-clearance.json").read_text("utf8"))
     result = DesktopApi(Repo(ROOT/"data/liftcalc.sqlite")).calculate(data)
     assert [tuple(s["center"]) for s in result["stations"]] == [(0,-5.5), (0,5.5)]
-    assert result["clearance"]["lower_m"] >= 1
+    # Before adjusting turns the same stations gave 1.010722 m and 20 legs.
+    assert result["clearance"]["lower_m"] >= 1.15
+    assert len(result["poses"])-1 < 20
     assert result["poses"][0] == (-11,0,90) and result["poses"][-1] == (11,0,90)
     for s in result["segments"]:
         assert not s["unknown"] and not s["unsafe"]
-        assert max(s["ratios"]) <= .8
-        assert all(upper < 15.5 for _,upper in s["radii"])
+        assert all(ratio <= 4.246/5.8 + 1e-12 for ratio in s["ratios"])
+        assert all(upper <= 15.06 for _,upper in s["radii"])
+
+
+def test_clearance_adjustment_preserves_pending_or_failed_result(data):
+    from liftcalc.crane.transfer_search import improve_clearance
+
+    case = Transfer.model_validate(data["transfer"])
+    repo = Repo(ROOT/"data/liftcalc.sqlite")
+    for mass in (2, 60):
+        case.mass = mass
+        result = analyze(case, repo)
+        assert any(s["unknown"] for s in result["segments"])
+        if mass == 60:
+            assert any(s["unsafe"] for s in result["segments"])
+        path, checked = improve_clearance(case, result, repo, {})
+        assert path is case and checked is result

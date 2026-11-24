@@ -183,6 +183,10 @@ class Box:
         return min(self.segment_distance(other.corners[i-1],p) for i,p in enumerate(other.corners))
 
 
+class RouteTooLong(ValueError):
+    """The required subdivisions exceed the supported route length."""
+
+
 def route_intervals(case):
     route = case.route
     leg_count = len(route)-1
@@ -194,7 +198,7 @@ def route_intervals(case):
         count = max(1, math.ceil(sweep/.2), math.ceil(turn/math.radians(1)))
         total += count
         if total > 5000:
-            raise ValueError("轨迹过长，请拆分工况。")
+            raise RouteTooLong("轨迹过长，请拆分工况。")
         for i in range(count):
             yield (leg, (leg+i/count)/leg_count, (leg+(i+1)/count)/leg_count,
                    travel/count, turn/count, sweep/count)
@@ -489,7 +493,7 @@ def plan_transfer(case, repo):
     """Bounded corridor search, with continuous interval checks on each finalist."""
     if not (case.auto_route or case.auto_stations):
         return case, analyze(case,repo)
-    from liftcalc.crane.transfer_search import lattice_routes
+    from liftcalc.crane.transfer_search import improve_clearance, lattice_routes
 
     loads = [(case.mass*share+c.rigging)*case.factor+c.hook
              for c,share in zip(case.cranes, case.shares())]
@@ -528,4 +532,4 @@ def plan_transfer(case, repo):
                 best = rank,path,result
     if best is None:
         raise ValueError("在本次有限搜索范围内未找到满足连续避碰、指定幅度上限及平面净距的路径。请核对起止位置、占地和可用场地。")
-    return best[1],best[2]
+    return improve_clearance(best[1], best[2], repo, chart_cache)

@@ -6,7 +6,7 @@ import math
 from bisect import bisect_left
 from functools import lru_cache
 
-from liftcalc.crane.transfer import clearance, point_segment, segment_gap, world
+from liftcalc.crane.transfer import RouteTooLong, analyze, clearance, point_segment, segment_gap, world
 
 
 def lattice_routes(case, charts, loads, limit, *, refinement=1):
@@ -144,3 +144,83 @@ def lattice_routes(case, charts, loads, limit, *, refinement=1):
         if route is not None and tuple(route) not in seen:
             seen.add(tuple(route))
             yield route
+
+
+def improve_clearance(path, result, repo, chart_cache):
+    """Maximize the certified gap in a small graph around a verified route."""
+    route = path.route
+    segments = result["segments"]
+    if len(route) < 3 or any(s["unsafe"] or s["unknown"] for s in segments):
+        return path, result
+
+    peak_radius = [max(s["radii"][i][1] for s in segments) for i in (0, 1)]
+    for i, crane in enumerate(path.cranes):
+        if crane.radius_limit is not None:
+            peak_radius[i] = min(peak_radius[i], crane.radius_limit)
+    peak_ratio = [max(s["ratios"][i] for s in segments) for i in (0, 1)]
+    old_gap = result["clearance"]["lower_m"]
+
+    def admissible(check):
+        for s in check["segments"]:
+            if s["unsafe"] or s["unknown"]:
+                return False
+            if any(s["radii"][i][1] > peak_radius[i] + 1e-9
+                   or s["ratios"][i] > peak_ratio[i] + 1e-12 for i in (0, 1)):
+                return False
+        return check["clearance"]["lower_m"] >= old_gap - 1e-9
+
+    # At each layer try the original waypoint and one pose moved halfway
+    # toward the chord midpoint. Start, finish, stations and lugs stay fixed.
+    layers = [[route[0]]]
+    for a,b,c in zip(route,route[1:],route[2:]):
+        rounded = tuple((x+2*y+z)/4 for x,y,z in zip(a,b,c))
+        # Enter or leave a turn slightly earlier at the same XY position.
+        early = (b[0], b[1], (b[2]+c[2])/2)
+        late = (b[0], b[1], (a[2]+b[2])/2)
+        layers.append(list(dict.fromkeys((b,rounded,early,late))))
+    layers.append([route[-1]])
+
+    # Best prefix to each vertex: widest bottleneck, then fewest legs.
+    scores = {(0,0): (math.inf, 0)}
+    parents = {}
+    intervals_checked = 0
+    for j in range(1,len(layers)):
+        for k,end in enumerate(layers[j]):
+            node = (j,k)
+            for i in range(max(0,j-3),j):
+                for h,start in enumerate(layers[i]):
+                    prev = (i,h)
+                    if prev not in scores:
+                        continue
+                    prefix_gap, neg_steps = scores[prev]
+                    if node in scores and (prefix_gap, neg_steps-1) <= scores[node]:
+                        continue
+                    if intervals_checked >= 30000:
+                        return path, result
+                    edge = path.model_copy(update={"start":start,"end":end,"waypoints":[]})
+                    try:
+                        check = analyze(edge, repo, chart_cache=chart_cache)
+                    except RouteTooLong:
+                        continue
+                    intervals_checked += len(check["segments"])
+                    if not admissible(check):
+                        continue
+                    score = (min(prefix_gap, check["clearance"]["lower_m"]), neg_steps-1)
+                    if node not in scores or score > scores[node]:
+                        scores[node], parents[node] = score, prev
+
+    node = (len(layers)-1,0)
+    if node not in parents:
+        return path, result
+    waypoints = []
+    while parents[node] != (0,0):
+        node = parents[node]
+        waypoints.append(layers[node[0]][node[1]])
+    trial = path.model_copy(update={"waypoints":list(reversed(waypoints))})
+    try:
+        check = analyze(trial, repo, chart_cache=chart_cache)
+    except RouteTooLong:
+        return path, result
+    if admissible(check) and check["clearance"]["lower_m"] > old_gap + 1e-9:
+        return trial, check
+    return path, result
