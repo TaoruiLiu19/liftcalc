@@ -6,11 +6,13 @@ from pathlib import Path
 import pytest
 
 from liftcalc.core.units import Q
-from liftcalc.crane.transfer import Transfer
+from liftcalc.crane.capability import Point, assess_single, split_by_ratio
+from liftcalc.crane.transfer import Transfer, interpolate_hook
 from liftcalc.data.repo import Repo
 from liftcalc.dusk import DesktopApi
 from liftcalc.lifting.load_geometry import LoadShape, sling_report
 from liftcalc.lifting.rigging import SlingArrangement, branch_force
+from liftcalc.services.calc import run_case
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -183,3 +185,73 @@ def test_dual_rotation_crosses_sany_chart_step(api, rotation):
         assert low <= 10.1 <= high
         assert segment["ratios"][1] == pytest.approx(28.565 / 32)
         assert "B表档负荷率超限" in segment["unsafe"]
+
+
+@pytest.mark.parametrize("total,factor,radius,booms,ratings,limit,expected_t,percent", [
+    pytest.param(132, 1 / 0.85, 18, (35, 35), (90.5, 90.5), .80,
+                 77.64, (85.8, 85.8), id="wuhan-sports-centre"),
+    pytest.param(105, 1.1 * 1.25, 10, (48, 15), (209, 110), .75,
+                 72.20, (34.5, 65.63), id="wuhan-metro-shield"),
+])
+def test_wuhan_published_design_loads(monkeypatch, total, factor, radius, booms,
+                                      ratings, limit, expected_t, percent):
+    # Inject only the two paper-specific rated points. These are not catalogue data.
+    repo = Repo(ROOT / "data/liftcalc.sqlite")
+    rows = {model: [dict(radius=radius, boom_len=boom, rated_load=rating,
+                         lift_height=None, boom_angle=None)]
+            for model, boom, rating in zip(("A", "B"), booms, ratings)}
+    monkeypatch.setattr(Repo, "model_capacity", lambda self, brand, model: rows[model])
+    case = dict(kind="crane.capability", mode="dual", payload=total,
+                left_share=.5, asynchronism=factor,
+                crane=dict(brand="论文", model="A"), second=dict(brand="论文", model="B"))
+    # Extract the bare numerical utilization, then exercise the comparison limit.
+    numerical = run_case(dict(case, limit=1), repo).aux["capability"]
+    checked = run_case(dict(case, limit=limit), repo).aux["capability"]
+    for side, expected_percent in zip(("left", "right"), percent):
+        assert numerical[side]["required"] == pytest.approx(expected_t, abs=.015)
+        assert numerical[side]["utilization"] * 100 == pytest.approx(expected_percent, abs=.05)
+        assert checked[side]["ok"] == (expected_percent <= 100 * limit)
+
+
+def test_park_module_21_capacity_between_rows():
+    # Appendix A, same boom and chart column, capacities originally in lb.
+    ft, lb = .3048, .00045359237
+    points = [Point(275.6 * ft, r * ft, cap * lb)
+              for r, cap in [(92, 460800), (98, 421100)]]
+    verdict, _, _, _ = assess_single(points, required=313926 * lb, limit=.9,
+                                     radius=95 * ft, height=None, config=None,
+                                     hook_known=True)
+    assert verdict.max_radius == pytest.approx(98 * ft)
+    assert verdict.rated_load == pytest.approx(421100 * lb)
+    assert verdict.utilization * 100 == pytest.approx(74.5, abs=.05)
+
+
+@pytest.mark.parametrize("station,pick,set_down,angles", [
+    ((100045, 71625), (100056.4, 71539.59), (99964.4, 71555.61), (-82.3879, -139.274)),
+    ((99955, 71680), (99923, 71623), (99823.65, 71682.09), (240.69, 179.09)),
+    ((99665, 71690), (99600, 71625), (99697.34, 71661.25), (-135, -41.6327)),
+    ((99550, 71500), (99474, 71560), (99461.94, 71461.61), (141.7098, 203.5529)),
+], ids=["module-21", "module-32", "module-56", "module-98"])
+def test_park_planar_slew(rotation, station, pick, set_down, angles):
+    # Park Appendix B: project coordinates in ft, separately tabulated slew in degrees.
+    def local_pose(xy):
+        return ((xy[0] - station[0]) * .3048, (xy[1] - station[1]) * .3048, 0.)
+
+    crane = Transfer.model_validate(rotation["transfer"]).cranes[0].model_copy(update={"center": (0, 0)})
+    start, end = local_pose(pick), local_pose(set_down)
+    # Compare the software's short-arc interpolation against the published end angles.
+    # Only the endpoints are values in the paper's numerical example.
+    for fraction in (0, .5, 1):
+        x, y, _ = interpolate_hook(crane, (0, 0), start, end, fraction)
+        predicted = math.degrees(math.atan2(y, x))
+        expected = angles[0] + fraction * (angles[1] - angles[0])
+        assert abs(math.remainder(predicted - expected, 360)) < .011
+
+
+def test_real_lifts_expose_load_assumptions():
+    # Schlamann A310: recorded split compared with the software's default assumption.
+    assumed = split_by_ratio(49)
+    assert (32.5 - assumed[0], 16.5 - assumed[1]) == pytest.approx((3.1, -3.1))
+    # Haslach: compare symmetric payload-only calculation with reported crane loads.
+    net = split_by_ratio(98, .5)
+    assert [51 - value for value in net] == pytest.approx([2, 2])
