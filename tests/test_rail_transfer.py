@@ -104,11 +104,10 @@ def test_plan_without_stations_or_waypoints():
     result = DesktopApi(Repo(ROOT/"data/liftcalc.sqlite")).calculate(data)
     assert result["poses"][0] == case.start and result["poses"][-1] == case.end
     assert len(result["poses"]) > 2 and result["stations"][0] != result["stations"][1]
-    mid = len(result["poses"])//2
-    # The demo turns and translates through the throat, with different hook paths.
-    inbound, throat, outbound = result["poses"][mid-1:mid+2]
-    assert abs(throat[2]) > .1 and abs(inbound[2]-throat[2]) > .01
-    assert math.dist(inbound[:2],outbound[:2]) > 0
+    # The solver may straighten in the throat; check passage and peak radii.
+    assert any(abs(p[2]-case.start[2]) > 30 for p in result["poses"])
+    for i in (0, 1):
+        assert max(s["radii"][i][1] for s in result["segments"]) < 13
     assert not any("相交" in m or "净距" in m for s in result["segments"] for m in s["unsafe"]+s["unknown"])
     assert any(s["unsafe"] for s in result["segments"])  # demo overload must remain visible
 
@@ -180,5 +179,24 @@ def test_clearance_threshold_uses_station_edges(data):
 
 def test_planner_prefers_verified_then_pending_then_known_failure():
     def rank(unsafe,unknown,ratio):
-        return candidate_rank([dict(unsafe=unsafe,unknown=unknown,ratios=[ratio])],1,5)
+        return candidate_rank([dict(unsafe=unsafe,unknown=unknown,ratios=[ratio],
+                                    radii=[(5,6),(5,6)])],1,5)
     assert rank([],[],.75) < rank([],["缺表"],None) < rank(["超限"],[],.85)
+
+
+def test_lattice_certifies_two_radius_caps_and_rejects_unreachable_endpoint():
+    data = json.loads((ROOT/"cases/rail-transfer-demo.json").read_text("utf8"))["transfer"]
+    case = Transfer.model_validate(data)
+    case.auto_stations = False
+    case.mass, case.cg = 6, (0,0,0)
+    for crane,y in zip(case.cranes,(-5.5,5.5)):
+        crane.center, crane.radius_limit, crane.verified_height = (0,y), 13, 6
+    repo = Repo(ROOT/"data/liftcalc.sqlite")
+    path, info = plan_transfer(case, repo)
+    assert path.cranes == case.cranes
+    for s in info["segments"]:
+        assert all(upper <= 13 for _, upper in s["radii"])
+        assert not s["unknown"] and not s["unsafe"]
+    case.cranes[1].radius_limit = 10
+    with pytest.raises(ValueError, match="幅度上限"):
+        plan_transfer(case, repo)

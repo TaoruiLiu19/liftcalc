@@ -14,11 +14,14 @@ const form = reactive({
   start: [-11,0,90], auto_route: true, auto_stations: true, end: [11,0,90], bottom: 1, plan_clearance: 0, factor: 1.1, gauge: 1.435,
   cranes: [-1,1].map(sign => ({index: -1, boom: 0, center: [0,sign*5.5], footprint_length: 10, footprint_width: 5, heading: 0, boom_buffer: 1,
     hook: null as number|null, hook_rating: null as number|null, rigging: 0.3, sling: {datum:'top',value:null} as RiggingMeasurement,
-    verified_height: null as number|null})),
+    verified_height: null as number|null, radius_limit: null as number|null})),
   obstacles: [] as number[][],
 })
 const active = ref(0), pick = ref(0), busy = ref(false), error = ref('')
 const result = ref<TransferResult>(), viewer = ref<InstanceType<typeof SheetViewer>>()
+const peakIntervals = computed(() => result.value ? [0,1].map(i =>
+  result.value!.segments.reduce((peak,s) => s.radii[i][1] > peak.radii[i][1] ? s : peak)
+) : [])
 const points = computed(() => [...form.lugs,form.cg])
 const stages = ['吊物与吊点', 'A 机工况', 'B 机工况', '转向与场地', '图纸与校核']
 const step = ref(0), reached = ref(0)
@@ -125,7 +128,7 @@ async function calculate() {
   try {
     const cranes=form.cranes.map(({index,center,heading,sling,...c})=>{
       const m=props.models[index]
-      return {...c,sling_height:riggingRise(sling,form.height), ...(form.auto_stations?{}:{center,heading}), verified_height:c.verified_height || null,model:m.model,brand:m.brand,config:m.config}
+      return {...c,sling_height:riggingRise(sling,form.height), ...(form.auto_stations?{}:{center,heading}), radius_limit:c.radius_limit || null,verified_height:c.verified_height || null,model:m.model,brand:m.brand,config:m.config}
     })
     const data=await window.pywebview!.api.calculate({kind:'rail.transfer',transfer:{...form,cranes}})
     if(id===revision){result.value=data;active.value=0;goto(4)}
@@ -199,6 +202,7 @@ const craneLabels=['臂投影包络半宽 / m','主钩自重 / t','主钩额载 
               </div>
             </section></div>
           <section class="block"><h3>作业包络与吊具</h3><div class="pair">
+            <NumberEntry v-model="crane.radius_limit" label="允许最大工作幅度 / m（选填）" :min=".000001" optional :attempted="attempted"/>
             <NumberEntry v-for="(key,k) in craneFields" :key="key" v-model="crane[key]" :label="craneLabels[k]" :min="key==='rigging'?0:.000001" :optional="key==='verified_height'" :attempted="attempted"/>
           </div></section>
         </div>
@@ -231,6 +235,7 @@ const craneLabels=['臂投影包络半宽 / m','主钩自重 / t','主钩额载 
     <div v-else-if="result" class="transfer-output"><h2 tabindex="-1">图纸与校核</h2>
       <div class="decision" :data-status="verdict"><strong>{{ {fail:'存在超限或禁入区相交',pending:'存在待核区间',pass:'所列校核项全段满足'}[verdict] }}</strong><span>A / B 计算总吊重　{{result.loads.map(x=>x.toFixed(2)).join(' / ')}} t</span></div>
       <p v-if="verdict!=='pass'" class="muted">以下为几何候选路径，仍有超限或待核项。</p>
+      <p>A / B 全程峰值幅度上界　{{peakIntervals.map((s,i)=>(Math.ceil(100*s.radii[i][1])/100).toFixed(2)).join(' / ')}} m</p>
       <div class="sheets">
         <section v-for="(d,i) in result.drawings" :key="d.id" class="block">
           <header><h3>{{i===0?'静力分析':'俯视转向轨迹'}}</h3><button @click="save(i)">导出 DXF</button></header>
@@ -247,6 +252,7 @@ const craneLabels=['臂投影包络半宽 / m','主钩自重 / t','主钩额载 
         <p v-for="(p,i) in result.poses" :key="i">P{{i}}　({{p.slice(0,2).map(x=>x.toFixed(2)).join(', ')}}) m · {{p[2].toFixed(1)}}°</p>
       </details>
         <div class="stack"><section v-for="(_,i) in form.cranes" :key="i" class="block"><h3>{{'AB'[i]}} 机校核</h3>
+          <p>幅度上界所在区间　P{{peakIntervals[i].leg-1}} → P{{peakIntervals[i].leg}}，路径进度 {{(100*peakIntervals[i].start).toFixed(1)}}%–{{(100*peakIntervals[i].end).toFixed(1)}}%</p>
           <p>幅度包络　{{Math.min(...result.segments.map(s=>s.radii[i][0])).toFixed(2)}}–{{Math.max(...result.segments.map(s=>s.radii[i][1])).toFixed(2)}} m</p>
           <p>已覆盖档最高负荷率　{{result.segments.some(s=>s.ratios[i]!==null)?(100*Math.max(...result.segments.map(s=>s.ratios[i]??0))).toFixed(1)+'%':'无数据'}}</p></section>
           <details class="block"><summary>分段校核明细（{{runs.length}}）</summary><p v-for="r in runs" :key="r.start" :data-status="r.level">P{{r.leg-1}} → P{{r.leg}}　{{(100*r.start).toFixed(2)}}% – {{(100*r.end).toFixed(2)}}%　{{r.text}}</p></details></div></div>

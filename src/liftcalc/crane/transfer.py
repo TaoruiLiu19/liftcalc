@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import math
 from bisect import bisect_left
+from itertools import chain
 from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -48,6 +49,7 @@ class Crane(Inputs):
     rigging: Nonnegative
     sling_height: Positive
     verified_height: Positive | None = None
+    radius_limit: Positive | None = None
 
 
 class Transfer(Inputs):
@@ -198,6 +200,15 @@ def route_intervals(case):
                    travel/count, turn/count, sweep/count)
 
 
+def chart_rows(crane, repo, cache):
+    key = (crane.brand, crane.model, crane.config, crane.boom)
+    if key not in cache:
+        rows = [r for r in repo.model_capacity(crane.brand, crane.model)
+                if r["config_name"] == crane.config and r["boom_len"] == crane.boom]
+        cache[key] = sorted(rows, key=lambda r: r["radius"])
+    return cache[key]
+
+
 def analyze(case, repo, *, chart_cache=None):
     shares = case.shares()
     boxes = [c.box for c in case.cranes]
@@ -218,12 +229,7 @@ def analyze(case, repo, *, chart_cache=None):
     charts = []
     loads = []
     for crane, share in zip(case.cranes, shares):
-        key = (crane.brand, crane.model, crane.config, crane.boom)
-        if key not in chart_cache:
-            rows = [r for r in repo.model_capacity(crane.brand, crane.model)
-                    if r["config_name"] == crane.config and r["boom_len"] == crane.boom]
-            chart_cache[key] = sorted(rows, key=lambda r: r["radius"])
-        charts.append(chart_cache[key])
+        charts.append(chart_rows(crane, repo, chart_cache))
         loads.append((case.mass*share + crane.rigging)*case.factor + crane.hook)
 
     segments = []
@@ -247,6 +253,14 @@ def analyze(case, repo, *, chart_cache=None):
             if not rows or min(witness) < radii[0] or max(witness) > radii[-1]:
                 unknown.append(tag+"幅度无表档")
             lower, upper = radius-delta, radius+delta
+            # Translation is linear. Only the rotating lug departs from its
+            # endpoint chord, by at most max|p''(t)|/8 on this interval.
+            upper = min(upper, max(witness[0], witness[-1])+math.hypot(*lug)*turn**2/8)
+            if crane.radius_limit is not None:
+                if max(witness) > crane.radius_limit + 1e-9:
+                    unsafe.append(tag+"超过指定幅度上限")
+                elif upper > crane.radius_limit + 1e-9:
+                    unknown.append(tag+"区间幅度上限待核")
             if rows and (lower < radii[0] or upper > radii[-1]):
                 unknown.append(tag+"幅度包络超出表域")
             radius_bounds.append((max(0, lower), upper))
@@ -450,14 +464,18 @@ def candidate_rank(segments, min_gap, motion):
     unknown = {msg for seg in segments for msg in seg["unknown"]}
     severity = 2 if unsafe else (1 if unknown else 0)
     peak = max((r for seg in segments for r in seg["ratios"] if r is not None), default=math.inf)
-    return severity, len(unsafe), len(unknown), peak, -min_gap, motion
+    peaks = sorted((max(s["radii"][i][1] for s in segments) for i in (0, 1)), reverse=True)
+    return severity, len(unsafe), len(unknown), *peaks, peak, -min_gap, motion
 
 
 def plan_transfer(case, repo):
     """Bounded corridor search, with continuous interval checks on each finalist."""
     if not (case.auto_route or case.auto_stations):
         return case, analyze(case,repo)
-    case.shares()
+    from liftcalc.crane.transfer_search import lattice_routes
+
+    loads = [(case.mass*share+c.rigging)*case.factor+c.hook
+             for c,share in zip(case.cranes, case.shares())]
     heading = math.atan2(case.end[1]-case.start[1], case.end[0]-case.start[0])
     best = None
     chart_cache = {}
@@ -467,7 +485,9 @@ def plan_transfer(case, repo):
         if boxes[0].distance(boxes[1])<=0 or any(clearance(box,box.pose,o)<=0
                 for box in boxes for o in case.obstacles):
             continue
-        for waypoints in candidate_routes(layout):
+        charts = [chart_rows(crane, repo, chart_cache) for crane in pair]
+        free_routes = lattice_routes(layout, charts, loads, DUAL_LIMIT)
+        for waypoints in chain(candidate_routes(layout), free_routes):
             path = layout.model_copy(update={"waypoints":waypoints})
             # Cheap collision rejection before evaluating the entire load chart.
             samples = max(8,8*(len(waypoints)+1))
@@ -480,9 +500,13 @@ def plan_transfer(case, repo):
             min_gap = result["clearance"]["lower_m"]
             if min_gap <= 0 or min_gap < case.plan_clearance:
                 continue
+            if any(c.radius_limit is not None and
+                   any(s["radii"][i][1] > c.radius_limit + 1e-9 for s in result["segments"])
+                   for i,c in enumerate(pair)):
+                continue
             rank = candidate_rank(result["segments"],min_gap,hook_motion_cost(path))
             if best is None or rank < best[0]:
                 best = rank,path,result
     if best is None:
-        raise ValueError("在本次有限搜索范围内未找到满足连续避碰及所设平面净距的路径。请核对起止位置、占地和可用场地。")
+        raise ValueError("在本次有限搜索范围内未找到满足连续避碰、指定幅度上限及平面净距的路径。请核对起止位置、占地和可用场地。")
     return best[1],best[2]
