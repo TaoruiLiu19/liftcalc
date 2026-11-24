@@ -5,12 +5,79 @@ from pathlib import Path
 import ezdxf
 import pytest
 
-from liftcalc.crane.transfer import (Box, Transfer, analyze, candidate_rank, clearance, interpolate_hook,
-                                     plan_transfer, segment_gap, world)
+from liftcalc.crane.transfer import (Box, Transfer, analyze, candidate_rank, candidate_routes, clearance, interpolate_hook,
+                                     plan_transfer, segment_gap, station_shift, world)
 from liftcalc.data.repo import Repo
 from liftcalc.dusk import DesktopApi
+from liftcalc.drawing.transfer import first_gate_crossing
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_automatic_stagger_around_opposing_obstacles():
+    data = json.loads((ROOT/"cases/rail-transfer-auto-stagger.json").read_text("utf8"))
+    assert all("center" not in c for c in data["transfer"]["cranes"])
+    result = DesktopApi(Repo(ROOT/"data/liftcalc.sqlite")).calculate(data)
+    a,b = (c["center"] for c in result["stations"])
+    assert a[0] > b[0] and math.dist(a,b) < data["transfer"]["length"]
+    assert result["clearance"]["lower_m"] >= data["transfer"]["plan_clearance"]
+    for segment in result["segments"]:
+        assert not segment["unsafe"] and not segment["unknown"]
+        assert all(upper < 12 for _,upper in segment["radii"])
+        assert max(segment["ratios"]) < .4
+
+
+def test_obstacle_shift_merges_overlaps_and_respects_corridor(data):
+    crane = Transfer.model_validate(data["transfer"]).cranes[0].model_copy(
+        update={"center":(0,0),"footprint_length":10,"footprint_width":5})
+    # Rotated longitudinal axis: the two disks exclude overlapping stations.
+    obstacles = [(0,0,1),(0,6,1)]
+    assert station_shift(crane,obstacles,math.pi/2,.5,-13,13) == pytest.approx(-6.5)
+    assert station_shift(crane,obstacles,math.pi/2,.5,-6,13) == pytest.approx(12.5)
+    assert station_shift(crane,obstacles,math.pi/2,.5,-6,12) is None
+    assert station_shift(crane,[(0,3.4,1)],0,.5,-10,10) == pytest.approx(-6.2)
+
+
+def test_staggered_cranes_allow_oblique_passage():
+    data = json.loads((ROOT/"cases/rail-transfer-oblique.json").read_text("utf8"))
+    result = DesktopApi(Repo(ROOT/"data/liftcalc.sqlite")).calculate(data)
+    assert result["clearance"]["lower_m"] >= .5
+    assert all(not s["unsafe"] and not s["unknown"] for s in result["segments"])
+    path = Transfer.model_validate(data["transfer"]).model_copy(update={"waypoints":result["poses"][1:-1]})
+    pose, yaw, travel = first_gate_crossing(path)
+    assert 11*pose[0]-3*pose[1] == pytest.approx(0, abs=1e-8)
+    assert 5 < yaw < travel < 45
+    svg = result["drawings"][1]["svg"]
+    assert f"车体 {yaw:.1f}°" in svg and f"形心行进 {travel:.1f}°" in svg
+
+
+def test_gate_touch_and_crossing_beyond_centres_are_not_transits(data):
+    case = Transfer.model_validate(data["transfer"])
+    case.start = (-2,0,30)
+    case.waypoints = [(0,0,30)]
+    case.end = (-1,0,30)
+    assert first_gate_crossing(case) is None
+    case.end = (1,0,30)
+    _, yaw, travel = first_gate_crossing(case)
+    assert (yaw,travel) == pytest.approx((30,0))
+    case.start,case.end,case.waypoints = (-2,20,0),(1,20,0),[]
+    assert first_gate_crossing(case) is None
+
+
+def test_skew_candidates_preserve_projected_body_clearance():
+    data = json.loads((ROOT/"cases/rail-transfer-1m-clearance.json").read_text("utf8"))
+    case = Transfer.model_validate(data["transfer"])
+    signs = set()
+    for route in candidate_routes(case):
+        if len(route) != 2:
+            continue
+        entry, departure = route
+        angle = math.radians(entry[2])
+        width = case.length*abs(math.sin(angle)) + case.width*abs(math.cos(angle))
+        # The inner faces are at y = +/-3 m. Centre drift uses the residual width.
+        assert max(abs(entry[1]),abs(departure[1])) + width/2 + case.plan_clearance <= 3+1e-9
+        signs.add((math.copysign(1,math.tan(angle)),math.copysign(1,departure[1]-entry[1])))
+    assert len(signs) == 4
 
 
 @pytest.fixture
@@ -104,11 +171,10 @@ def test_plan_without_stations_or_waypoints():
     result = DesktopApi(Repo(ROOT/"data/liftcalc.sqlite")).calculate(data)
     assert result["poses"][0] == case.start and result["poses"][-1] == case.end
     assert len(result["poses"]) > 2 and result["stations"][0] != result["stations"][1]
-    mid = len(result["poses"])//2
-    # The demo turns and translates through the throat, with different hook paths.
-    inbound, throat, outbound = result["poses"][mid-1:mid+2]
-    assert abs(throat[2]) > .1 and abs(inbound[2]-throat[2]) > .01
-    assert math.dist(inbound[:2],outbound[:2]) > 0
+    # The solver may straighten in the throat; check passage and peak radii.
+    assert any(abs(p[2]-case.start[2]) > 30 for p in result["poses"])
+    for i in (0, 1):
+        assert max(s["radii"][i][1] for s in result["segments"]) < 13
     assert not any("相交" in m or "净距" in m for s in result["segments"] for m in s["unsafe"]+s["unknown"])
     assert any(s["unsafe"] for s in result["segments"])  # demo overload must remain visible
 
@@ -180,5 +246,53 @@ def test_clearance_threshold_uses_station_edges(data):
 
 def test_planner_prefers_verified_then_pending_then_known_failure():
     def rank(unsafe,unknown,ratio):
-        return candidate_rank([dict(unsafe=unsafe,unknown=unknown,ratios=[ratio])],1,5)
+        return candidate_rank([dict(unsafe=unsafe,unknown=unknown,ratios=[ratio],
+                                    radii=[(5,6),(5,6)])],1,5)
     assert rank([],[],.75) < rank([],["缺表"],None) < rank(["超限"],[],.85)
+
+
+def test_lattice_certifies_two_radius_caps_and_rejects_unreachable_endpoint():
+    data = json.loads((ROOT/"cases/rail-transfer-demo.json").read_text("utf8"))["transfer"]
+    case = Transfer.model_validate(data)
+    case.auto_stations = False
+    case.mass, case.cg = 6, (0,0,0)
+    for crane,y in zip(case.cranes,(-5.5,5.5)):
+        crane.center, crane.radius_limit, crane.verified_height = (0,y), 13, 6
+    repo = Repo(ROOT/"data/liftcalc.sqlite")
+    path, info = plan_transfer(case, repo)
+    assert path.cranes == case.cranes
+    for s in info["segments"]:
+        assert all(upper <= 13 for _, upper in s["radii"])
+        assert not s["unknown"] and not s["unsafe"]
+    case.cranes[1].radius_limit = 10
+    with pytest.raises(ValueError, match="幅度上限"):
+        plan_transfer(case, repo)
+
+
+def test_one_metre_gap_with_locked_stations():
+    data = json.loads((ROOT/"cases/rail-transfer-1m-clearance.json").read_text("utf8"))
+    result = DesktopApi(Repo(ROOT/"data/liftcalc.sqlite")).calculate(data)
+    assert [tuple(s["center"]) for s in result["stations"]] == [(0,-5.5), (0,5.5)]
+    # Before adjusting turns the same stations gave 1.010722 m and 20 legs.
+    assert result["clearance"]["lower_m"] >= 1.15
+    assert len(result["poses"])-1 < 20
+    assert result["poses"][0] == (-11,0,90) and result["poses"][-1] == (11,0,90)
+    for s in result["segments"]:
+        assert not s["unknown"] and not s["unsafe"]
+        assert all(ratio <= 4.246/5.8 + 1e-12 for ratio in s["ratios"])
+        assert all(upper <= 15.06 for _,upper in s["radii"])
+
+
+def test_clearance_adjustment_preserves_pending_or_failed_result(data):
+    from liftcalc.crane.transfer_search import improve_clearance
+
+    case = Transfer.model_validate(data["transfer"])
+    repo = Repo(ROOT/"data/liftcalc.sqlite")
+    for mass in (2, 60):
+        case.mass = mass
+        result = analyze(case, repo)
+        assert any(s["unknown"] for s in result["segments"])
+        if mass == 60:
+            assert any(s["unsafe"] for s in result["segments"])
+        path, checked = improve_clearance(case, result, repo, {})
+        assert path is case and checked is result

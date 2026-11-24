@@ -1,0 +1,82 @@
+{
+  "kind": "rail.transfer",
+  "transfer": {
+    "auto_route": true,
+    "auto_stations": false,
+    "length": 12.0,
+    "width": 3.0,
+    "height": 3.0,
+    "mass": 6.0,
+    "cg": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "lugs": [
+      [
+        -5.0,
+        0.0
+      ],
+      [
+        5.0,
+        0.0
+      ]
+    ],
+    "cranes": [
+      {
+        "brand": "徐工",
+        "model": "QY70K-1",
+        "config": "主臂25.98m",
+        "boom": 25.98,
+        "center": [
+          0.0,
+          -5.5
+        ],
+        "boom_buffer": 1.0,
+        "footprint_length": 10.0,
+        "footprint_width": 5.0,
+        "heading": 0.0,
+        "hook": 0.616,
+        "hook_rating": 32.0,
+        "rigging": 0.3,
+        "sling_height": 2.0,
+        "verified_height": 6.0
+      },
+      {
+        "brand": "徐工",
+        "model": "QY70K-1",
+        "config": "主臂25.98m",
+        "boom": 25.98,
+        "center": [
+          0.0,
+          5.5
+        ],
+        "boom_buffer": 1.0,
+        "footprint_length": 10.0,
+        "footprint_width": 5.0,
+        "heading": 0.0,
+        "hook": 0.616,
+        "hook_rating": 32.0,
+        "rigging": 0.3,
+        "sling_height": 2.0,
+        "verified_height": 6.0
+      }
+    ],
+    "start": [
+      -11.0,
+      0.0,
+      90.0
+    ],
+    "end": [
+      11.0,
+      0.0,
+      90.0
+    ],
+    "waypoints": [],
+    "gauge": 1.435,
+    "bottom": 1.0,
+    "plan_clearance": 1.0,
+    "factor": 1.1,
+    "obstacles": []
+  }
+}

@@ -93,6 +93,33 @@ def statics(case, result, corners):
     return fig
 
 
+def first_gate_crossing(case):
+    """First side change across the finite segment joining the slew centres."""
+    a,b = (crane.center for crane in case.cranes)
+    length = math.dist(a,b)
+    if length < 1e-9:
+        return None
+    tx,ty = (b[0]-a[0])/length, (b[1]-a[1])/length
+    nx,ny = ty,-tx
+    route = case.route
+    previous_side = 0
+    for i,(p,q) in enumerate(zip(route,route[1:])):
+        d = (p[0]-a[0])*nx+(p[1]-a[1])*ny
+        e = (q[0]-a[0])*nx+(q[1]-a[1])*ny
+        if abs(d) > 1e-9:
+            previous_side = 1 if d > 0 else -1
+        if previous_side*e >= -1e-9:
+            continue
+        u = max(0.0,min(1.0,d/(d-e)))
+        pose = case.pose((i+u)/(len(route)-1))
+        along = (pose[0]-a[0])*tx+(pose[1]-a[1])*ty
+        if 0 < along < length:
+            def inclination(x,y):
+                return math.degrees(math.atan2(abs(x*tx+y*ty),abs(x*nx+y*ny)))
+            return pose, inclination(pose[2],pose[3]), inclination(q[0]-p[0],q[1]-p[1])
+    return None
+
+
 def trajectory(case, result, corners):
     poses = [case.pose(s["start"]) for s in result["segments"]]+[case.pose(1)]
     disks = case.obstacles
@@ -117,7 +144,13 @@ def trajectory(case, result, corners):
         fig.add(Line(*ends[0],*ends[1],"THIN"))
     ca,cb = case.cranes
     middle = tuple((a+b)/2 for a,b in zip(ca.center,cb.center))
-    gate_pose = min(poses,key=lambda p: math.dist(p[:2],middle))
+    crossing = first_gate_crossing(case)
+    gate_pose = crossing[0] if crossing else min(poses,key=lambda p: math.dist(p[:2],middle))
+    if crossing:
+        fig.add(Line(*paper(ca.center),*paper(cb.center),"CENTER"),
+                Polyline(tuple(paper(world(gate_pose,p)) for p in corners),True,"RIGGING"),
+                Text(36,274,f"首次穿越两机中心连线（法向为 0°） · 车体 {crossing[1]:.1f}°，"
+                     f"形心行进 {crossing[2]:.1f}°",height=3.2))
     for j,crane in enumerate(case.cranes):
         px,py = paper(crane.center)
         fig.add(Polyline(tuple(paper(p) for p in crane.box.corners)),

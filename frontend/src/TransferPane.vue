@@ -14,11 +14,14 @@ const form = reactive({
   start: [-11,0,90], auto_route: true, auto_stations: true, end: [11,0,90], bottom: 1, plan_clearance: 0, factor: 1.1, gauge: 1.435,
   cranes: [-1,1].map(sign => ({index: -1, boom: 0, center: [0,sign*5.5], footprint_length: 10, footprint_width: 5, heading: 0, boom_buffer: 1,
     hook: null as number|null, hook_rating: null as number|null, rigging: 0.3, sling: {datum:'top',value:null} as RiggingMeasurement,
-    verified_height: null as number|null})),
+    verified_height: null as number|null, radius_limit: null as number|null})),
   obstacles: [] as number[][],
 })
 const active = ref(0), pick = ref(0), busy = ref(false), error = ref('')
 const result = ref<TransferResult>(), viewer = ref<InstanceType<typeof SheetViewer>>()
+const peakIntervals = computed(() => result.value ? [0,1].map(i =>
+  result.value!.segments.reduce((peak,s) => s.radii[i][1] > peak.radii[i][1] ? s : peak)
+) : [])
 const points = computed(() => [...form.lugs,form.cg])
 const stages = ['吊物与吊点', 'A 机工况', 'B 机工况', '转向与场地', '图纸与校核']
 const step = ref(0), reached = ref(0)
@@ -45,7 +48,7 @@ function advance(target = step.value + 1) {
     editor.value?.querySelector<HTMLInputElement>('input:invalid')?.focus()
     return
   }
-  if (step.value===0 && (geometryError.value || form.cranes.some(c=>(riggingRise(c.sling,form.height) ?? 0)<=0))) return
+  if (step.value===0 && (split.value.error || form.cranes.some(c=>(riggingRise(c.sling,form.height) ?? 0)<=0))) return
   if (target === 4 && !result.value) { void calculate(); return }
   goto(target)
 }
@@ -63,19 +66,24 @@ watch(()=>props.models, models=>{
   const idx = models.findIndex(m=>m.model==='QY70K-1' && m.booms.includes(25.98))
   if (models.length) for(let i=0;i<2;i++) selectModel(i,Math.max(idx,0))
 },{immediate:true})
-const geometryError = computed(() => {
-  const [[ax,ay],[bx,by]]=form.lugs, [gx,gy,gz]=form.cg
-  for(const [i,p] of points.value.entries()){
-    if(p.some(v=>!Number.isFinite(v)) || Math.abs(p[0])>form.length/2 || Math.abs(p[1])>form.width/2)
-      return 'ABG'[i]+' 点坐标超出顶面或有空值，请选择该点修正坐标。'
+const split = computed(() => {
+  const [[ax, ay], [bx, by]] = form.lugs
+  const [gx, gy, gz] = form.cg
+  if (![form.length, form.width, form.height, form.mass].every(v => Number.isFinite(v) && v > 0))
+    return {error: '请填写大于零的吊物尺寸和质量。'}
+  for (const [i, p] of points.value.entries()) {
+    if (p.some(v => !Number.isFinite(v)) || Math.abs(p[0]) > form.length/2 || Math.abs(p[1]) > form.width/2)
+      return {error: 'ABG'[i] + ' 点坐标超出顶面或有空值，请选择该点修正坐标。'}
   }
-  if(Math.abs(gz)>=form.height/2) return 'G 点 Z 坐标须在吊物上下表面之间。'
-  const dx=bx-ax,dy=by-ay,span=Math.hypot(dx,dy)
-  if(span<1e-6) return 'A、B 吊点重合，请移动一个吊点。'
-  const projection=(gx-ax)*dx+(gy-ay)*dy
-  if(Math.abs((gx-ax)*dy-(gy-ay)*dx)>1e-8*span || projection<=0 || projection>=span**2)
-    return '重心投影须位于 A、B 连线的两个端点之间。'
-  return ''
+  if (Math.abs(gz) >= form.height/2) return {error: 'G 点 Z 坐标须在吊物上下表面之间。'}
+  const dx = bx - ax, dy = by - ay, span = Math.hypot(dx, dy)
+  if (span < 1e-6) return {error: 'A、B 吊点重合，请移动一个吊点。'}
+  if (Math.abs((gx-ax)*dy - (gy-ay)*dx) / span > 1e-8)
+    return {error: '重心投影偏离 AB 连线，当前吊点无法维持水平悬吊。'}
+  const shareB = ((gx-ax)*dx + (gy-ay)*dy) / span**2
+  if (shareB <= 0 || shareB >= 1)
+    return {error: '重心投影须在 A、B 两个吊点之间，两侧吊索均须受拉。'}
+  return {shares: [1 - shareB, shareB]}
 })
 const snap=ref(true)
 function place(x:number,y:number){
@@ -125,7 +133,7 @@ async function calculate() {
   try {
     const cranes=form.cranes.map(({index,center,heading,sling,...c})=>{
       const m=props.models[index]
-      return {...c,sling_height:riggingRise(sling,form.height), ...(form.auto_stations?{}:{center,heading}), verified_height:c.verified_height || null,model:m.model,brand:m.brand,config:m.config}
+      return {...c,sling_height:riggingRise(sling,form.height), ...(form.auto_stations?{}:{center,heading}), radius_limit:c.radius_limit || null,verified_height:c.verified_height || null,model:m.model,brand:m.brand,config:m.config}
     })
     const data=await window.pywebview!.api.calculate({kind:'rail.transfer',transfer:{...form,cranes}})
     if(id===revision){result.value=data;active.value=0;goto(4)}
@@ -170,12 +178,19 @@ const craneLabels=['臂投影包络半宽 / m','主钩自重 / t','主钩额载 
         </div>
         <div class="columns">
           <TransferPlot v-bind="scene" @place="place"/>
-          <section class="block point-editor" :class="{invalid:geometryError}"><h3>选择编辑点</h3>
+          <section class="block point-editor" :class="{invalid:split.error}"><h3>选择编辑点</h3>
             <div class="point-tabs"><button v-for="(tag,i) in ['吊点 A','吊点 B','重心 G']" :key="tag" type="button" :aria-pressed="pick===i" @click="pick=i">{{tag}}</button></div>
             <div class="pair"><NumberEntry v-for="(_,k) in points[pick]" :key="pick+'-'+k" v-model="points[pick][k]" :label="'局部 '+ 'XYZ'[k]+' / m'" :min="-[form.length,form.width,form.height][k]/2" :max="[form.length,form.width,form.height][k]/2" :attempted="attempted"/></div>
             <label v-if="pick===2"><input type="checkbox" v-model="snap"> 点选时吸附至 AB 连线</label>
             <p class="muted">点击图中顶面定位，或输入坐标微调。Z 从形心向上量取。</p>
-            <p v-if="geometryError" class="alert" role="alert">{{geometryError}}</p>
+            <p v-if="split.error" class="alert" role="alert">{{split.error}}</p>
+            <section v-else class="split-preview" aria-live="polite">
+              <h3>吊物静态分载</h3>
+              <dl><div v-for="(share,i) in split.shares" :key="i">
+                <dt>{{'AB'[i]}} 机</dt>
+                <dd>{{(form.mass * share).toFixed(2)}} t · {{(share * 100).toFixed(1)}}%</dd>
+              </div></dl>
+            </section>
           </section>
         </div>
       </template>
@@ -199,6 +214,7 @@ const craneLabels=['臂投影包络半宽 / m','主钩自重 / t','主钩额载 
               </div>
             </section></div>
           <section class="block"><h3>作业包络与吊具</h3><div class="pair">
+            <NumberEntry v-model="crane.radius_limit" label="允许最大工作幅度 / m（选填）" :min=".000001" optional :attempted="attempted"/>
             <NumberEntry v-for="(key,k) in craneFields" :key="key" v-model="crane[key]" :label="craneLabels[k]" :min="key==='rigging'?0:.000001" :optional="key==='verified_height'" :attempted="attempted"/>
           </div></section>
         </div>
@@ -230,7 +246,9 @@ const craneLabels=['臂投影包络半宽 / m','主钩自重 / t','主钩额载 
     </form>
     <div v-else-if="result" class="transfer-output"><h2 tabindex="-1">图纸与校核</h2>
       <div class="decision" :data-status="verdict"><strong>{{ {fail:'存在超限或禁入区相交',pending:'存在待核区间',pass:'所列校核项全段满足'}[verdict] }}</strong><span>A / B 计算总吊重　{{result.loads.map(x=>x.toFixed(2)).join(' / ')}} t</span></div>
+      <p>A / B 吊物静态分载　{{result.shares.map(s => (s * form.mass).toFixed(2) + ' t（' + (s * 100).toFixed(1) + '%）').join(' / ')}}</p>
       <p v-if="verdict!=='pass'" class="muted">以下为几何候选路径，仍有超限或待核项。</p>
+      <p>A / B 全程峰值幅度上界　{{peakIntervals.map((s,i)=>(Math.ceil(100*s.radii[i][1])/100).toFixed(2)).join(' / ')}} m</p>
       <div class="sheets">
         <section v-for="(d,i) in result.drawings" :key="d.id" class="block">
           <header><h3>{{i===0?'静力分析':'俯视转向轨迹'}}</h3><button @click="save(i)">导出 DXF</button></header>
@@ -247,6 +265,7 @@ const craneLabels=['臂投影包络半宽 / m','主钩自重 / t','主钩额载 
         <p v-for="(p,i) in result.poses" :key="i">P{{i}}　({{p.slice(0,2).map(x=>x.toFixed(2)).join(', ')}}) m · {{p[2].toFixed(1)}}°</p>
       </details>
         <div class="stack"><section v-for="(_,i) in form.cranes" :key="i" class="block"><h3>{{'AB'[i]}} 机校核</h3>
+          <p>幅度上界所在区间　P{{peakIntervals[i].leg-1}} → P{{peakIntervals[i].leg}}，路径进度 {{(100*peakIntervals[i].start).toFixed(1)}}%–{{(100*peakIntervals[i].end).toFixed(1)}}%</p>
           <p>幅度包络　{{Math.min(...result.segments.map(s=>s.radii[i][0])).toFixed(2)}}–{{Math.max(...result.segments.map(s=>s.radii[i][1])).toFixed(2)}} m</p>
           <p>已覆盖档最高负荷率　{{result.segments.some(s=>s.ratios[i]!==null)?(100*Math.max(...result.segments.map(s=>s.ratios[i]??0))).toFixed(1)+'%':'无数据'}}</p></section>
           <details class="block"><summary>分段校核明细（{{runs.length}}）</summary><p v-for="r in runs" :key="r.start" :data-status="r.level">P{{r.leg-1}} → P{{r.leg}}　{{(100*r.start).toFixed(2)}}% – {{(100*r.end).toFixed(2)}}%　{{r.text}}</p></details></div></div>
@@ -272,6 +291,9 @@ h3{font-size:15px;margin:0 0 10px}.block{padding:15px;border-radius:12px;border:
 .actions{justify-content:flex-end;margin-top:18px;padding-top:14px;border-top:1px solid var(--line)}.actions .primary{margin:0;width:auto;min-width:125px}
 .alert,[data-status=fail],:deep(.field-error){color:var(--danger)}.alert,.decision{padding:12px;border-radius:8px}.alert,.decision[data-status=fail]{background:var(--danger-bg);border-left:3px solid var(--danger)}
 .workflow-panel :deep(input[aria-invalid=true]){outline-color:var(--danger);border:1.5px solid var(--danger);background:var(--danger-bg)}:deep(.field-error){display:block;font-size:12px}
+.split-preview{border-top:1px solid var(--line);padding-top:12px}
+.split-preview dl{display:flex;flex-wrap:wrap;gap:8px 24px;margin:0}
+.split-preview dt{color:var(--quiet)}.split-preview dd{margin:3px 0 0;font-weight:600;font-variant-numeric:tabular-nums}
 .point-editor.invalid{border-color:var(--danger)}
 .decision{justify-content:space-between;background:var(--wash);flex-wrap:wrap}.decision[data-status=pending],[data-status=pending]{color:var(--warm)}
 .sheets{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,350px),1fr));gap:12px;margin-top:12px}.sheets .block{padding:10px}.sheets header{display:flex;align-items:center;justify-content:space-between}.sheets h3{margin:0}.sheets .paper{height:auto;aspect-ratio:420/297;padding:2px}.sheets .sheet-open{display:block}.result-layout{grid-template-columns:minmax(0,1.7fr) minmax(230px,1fr)}.paper{height:clamp(250px,49vh,580px);margin-top:12px}
