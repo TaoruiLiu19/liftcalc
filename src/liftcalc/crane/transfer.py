@@ -429,6 +429,28 @@ def candidate_routes(case):
     def blend(a,b,t):
         return tuple(x+t*(y-x) for x,y in zip(a,b))
 
+    # Use the clear strip between the two footprint projections to seed
+    # oblique crossings. This is sufficient geometry for a candidate only;
+    # all connections, load charts and boom envelopes are checked downstream.
+    span = upper-lower-2*case.plan_clearance
+    diagonal = math.hypot(case.length,case.width)
+    if span > case.width:
+        yaw_limit = (math.pi/2 if span >= diagonal else
+                     math.asin(span/diagonal)-math.atan2(case.width,case.length))
+        for sign in (-1,1):
+            for fraction in (.45,.85):
+                tilt = sign*fraction*yaw_limit
+                side_room = (span-case.length*abs(math.sin(tilt))-case.width*math.cos(tilt))/2
+                # Centre travel and body yaw can be oblique independently.
+                for drift in (-.8*side_room, .8*side_room):
+                    for axis in (angle, angle+(180 if angle<case.start[2] else -180)):
+                        yaw = axis+math.degrees(tilt)
+                        entry = point(-depth,gate-drift,yaw)
+                        departure = point(depth,gate+drift,yaw)
+                        yield [entry,departure]
+                        yield [point(-reach,gate-drift,yaw),entry,departure,
+                               point(reach,gate+drift,yaw)]
+
     for axis in (angle, angle+(180 if angle<case.start[2] else -180)):
         for direction in (1,-1):
             for fraction in (.65,.28):

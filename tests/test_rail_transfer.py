@@ -5,12 +5,55 @@ from pathlib import Path
 import ezdxf
 import pytest
 
-from liftcalc.crane.transfer import (Box, Transfer, analyze, candidate_rank, clearance, interpolate_hook,
+from liftcalc.crane.transfer import (Box, Transfer, analyze, candidate_rank, candidate_routes, clearance, interpolate_hook,
                                      plan_transfer, segment_gap, world)
 from liftcalc.data.repo import Repo
 from liftcalc.dusk import DesktopApi
+from liftcalc.drawing.transfer import first_gate_crossing
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_staggered_cranes_allow_oblique_passage():
+    data = json.loads((ROOT/"cases/rail-transfer-oblique.json").read_text("utf8"))
+    result = DesktopApi(Repo(ROOT/"data/liftcalc.sqlite")).calculate(data)
+    assert result["clearance"]["lower_m"] >= .5
+    assert all(not s["unsafe"] and not s["unknown"] for s in result["segments"])
+    path = Transfer.model_validate(data["transfer"]).model_copy(update={"waypoints":result["poses"][1:-1]})
+    pose, yaw, travel = first_gate_crossing(path)
+    assert 11*pose[0]-3*pose[1] == pytest.approx(0, abs=1e-8)
+    assert 5 < yaw < travel < 45
+    svg = result["drawings"][1]["svg"]
+    assert f"车体 {yaw:.1f}°" in svg and f"形心行进 {travel:.1f}°" in svg
+
+
+def test_gate_touch_and_crossing_beyond_centres_are_not_transits(data):
+    case = Transfer.model_validate(data["transfer"])
+    case.start = (-2,0,30)
+    case.waypoints = [(0,0,30)]
+    case.end = (-1,0,30)
+    assert first_gate_crossing(case) is None
+    case.end = (1,0,30)
+    _, yaw, travel = first_gate_crossing(case)
+    assert (yaw,travel) == pytest.approx((30,0))
+    case.start,case.end,case.waypoints = (-2,20,0),(1,20,0),[]
+    assert first_gate_crossing(case) is None
+
+
+def test_skew_candidates_preserve_projected_body_clearance():
+    data = json.loads((ROOT/"cases/rail-transfer-1m-clearance.json").read_text("utf8"))
+    case = Transfer.model_validate(data["transfer"])
+    signs = set()
+    for route in candidate_routes(case):
+        if len(route) != 2:
+            continue
+        entry, departure = route
+        angle = math.radians(entry[2])
+        width = case.length*abs(math.sin(angle)) + case.width*abs(math.cos(angle))
+        # The inner faces are at y = +/-3 m. Centre drift uses the residual width.
+        assert max(abs(entry[1]),abs(departure[1])) + width/2 + case.plan_clearance <= 3+1e-9
+        signs.add((math.copysign(1,math.tan(angle)),math.copysign(1,departure[1]-entry[1])))
+    assert len(signs) == 4
 
 
 @pytest.fixture

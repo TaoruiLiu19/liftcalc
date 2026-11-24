@@ -95,6 +95,8 @@ def lattice_routes(case, charts, loads, limit, *, refinement=1):
         expanded = 0
         directions = [(x,y,k) for x,y in ((1,0),(-1,0),(0,1),(0,-1),(0,0))
                       for k in (-1,0,1) if x or y or k]
+        # A suspended body may also translate diagonally while keeping its yaw.
+        directions.extend((x,y,0) for x in (-1,1) for y in (-1,1))
         while queue:
             peak, steps, node = heapq.heappop(queue)
             if (peak, steps) != best[node]:
