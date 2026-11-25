@@ -18,6 +18,7 @@ from typing import Any
 from liftcalc.core.result import ComputationResult
 from liftcalc.drawing import dim as D
 from liftcalc.drawing import sheet as S
+from liftcalc.drawing.annotation import clear_annotation_lines, nearby_labels, place_label
 from liftcalc.drawing.body import (
     BODY_MODEL_FRONT,
     CAB_LEFT_EDGE,
@@ -213,7 +214,7 @@ def capability_figure(result: ComputationResult) -> Figure | None:
     _, y_req = xy(0, required)
     figure.add(
         Line(x1=pad, y1=y_req, x2=width - pad, y2=y_req, layer=LAYER_DIM),
-        Text(x=pad + 2, y=y_req + 2.0, content=f"计算荷载 {required:.2f} t", height=3.2,
+        Text(x=pad + 2, y=y_req + 2.0, content=f"计算总起重量 {required:.2f} t", height=3.2,
              layer=LAYER_DIM),
     )
 
@@ -346,23 +347,24 @@ def _elevation_model(cap: dict[str, Any], detail: dict[str, Any],
     load_h = float(load.get("height_m") or DEFAULT_LOAD_H)
     clearance = float(load.get("clearance_m") if load.get("clearance_m") is not None else 1.0)
     sling = float(load.get("sling_height_m") or SLING_RATIO * max(load_w, 1.0))
-    hook_h = float(
+    required_hook_h = float(
         load.get("hook_height_m")
         or (clearance + load_h + sling)
     )
+    hook_h = required_hook_h
 
     tip_y = HINGE_H + boom_len * math.sin(math.radians(angle))
     limit = tip_y - (BLOCK_GAP + BLOCK_H + ROPE_MIN)
     if hook_h > limit:
         hook_h = max(limit, 0.4)
         notes.append(
-            "图示所需起升高度超出该臂长可达高度，吊钩已按臂端极限绘制"
+            f"所需吊钩中心离地高度 {required_hook_h:.2f} m 超出示意几何范围，吊钩已按图示臂端极限绘制"
         )
 
     rated = detail.get("lift_height")
-    if rated is not None and hook_h > float(rated) + 1e-6:
+    if rated is not None and required_hook_h > float(rated) + 1e-6:
         notes.append(
-            f"该格额定起升高度 {float(rated):.2f} m 小于图示要求 {hook_h:.2f} m，"
+            f"该工况的表列起升高度 {float(rated):.2f} m 低于所需吊钩中心离地高度 {required_hook_h:.2f} m，"
             "需另行校核该工况起升高度"
         )
 
@@ -451,7 +453,8 @@ def _draw_boom(figure: Figure, paper: _Paper, model: ElevationModel) -> None:
         pin(paper(*center), .085)
 
 
-def _draw_luffing_cylinder(figure: Figure, paper: _Paper, model: ElevationModel) -> None:
+def _draw_luffing_cylinder(figure: Figure, paper: _Paper, model: ElevationModel,
+                          *, annotate: bool = True) -> None:
     hx, hy = model.hinge
     cosine, sine = math.cos(model.rad), math.sin(model.rad)
 
@@ -481,8 +484,9 @@ def _draw_luffing_cylinder(figure: Figure, paper: _Paper, model: ElevationModel)
             Polyline((cylinder(collar, -.10), cylinder(end, -.10), cylinder(end, .10),
                       cylinder(collar, .10)), False, LAYER_OUTLINE),
         )
-        target = cylinder((visible + collar) / 2, .19)
-        D.leader(figure, target, (target[0] - 6, target[1] + 5), "变幅油缸", align=ALIGN_RIGHT, height=2.6)
+        if annotate:
+            target = cylinder((visible + collar) / 2, .19)
+            D.leader(figure, target, (target[0] - 6, target[1] + 5), "变幅油缸", align=ALIGN_RIGHT, height=2.6)
 
     lug = (on_boom(max(0, distance - .34), -BOOM_HALF_FOOT),
            on_boom(distance + .34, -BOOM_HALF_FOOT), upper)
@@ -541,7 +545,7 @@ def _rope_behind_boom(model: ElevationModel, start: tuple[float, float],
     return ranges
 
 
-def _draw_rope(figure: Figure, paper: _Paper, model: ElevationModel) -> None:
+def _draw_rope(figure: Figure, paper: _Paper, model: ElevationModel, *, annotate: bool = True) -> None:
     """沿切线和轮缘绘制起升绳的侧视投影。"""
     guide, head, block = model.guide_sheave, model.head_sheave, model.block_sheave
     r = LIFT_SHEAVE_RADIUS
@@ -590,8 +594,9 @@ def _draw_rope(figure: Figure, paper: _Paper, model: ElevationModel) -> None:
         Line(*paper(anchor[0] - .09, anchor[1]), *paper(anchor[0] + .09, anchor[1]), LAYER_OUTLINE),
     )
 
-    target = lead_at(marker)
-    D.leader(figure, target, (target[0] + 8, target[1] + 6), "起升钢丝绳", height=2.6, dot=False)
+    if annotate:
+        target = lead_at(marker)
+        D.leader(figure, target, (target[0] + 8, target[1] + 6), "起升钢丝绳", height=2.6, dot=False)
 
 
 def centroid_symbol(figure: Figure, paper: _Paper, x: float, y: float,
@@ -629,10 +634,6 @@ def _draw_load(figure: Figure, paper: _Paper, model: ElevationModel) -> None:
         c = paper(lug_x, top)
         figure.add(Line(x1=hook[0], y1=hook[1], x2=c[0], y2=c[1], layer=LAYER_RIGGING),
                    Circle(cx=c[0], cy=c[1], r=0.85, layer=LAYER_RIGGING))
-
-    # 吊物文字放在框内左下角，避开重心符号
-    figure.add(Text(x=paper(x - half + 1.4, 0.0)[0], y=paper(0.0, bottom + 0.35)[1],
-                    content="吊物", height=2.6, layer=LAYER_TEXT))
 
     # 重心：形心符号 + 偏心引线
     cx, cy = model.cg
@@ -732,7 +733,7 @@ def _draw_markers(figure: Figure, paper: _Paper, model: ElevationModel) -> None:
     D.leader(figure, (head_x, head_y), (head_x - 7, head_y + 10), "臂头滑轮组",
              align=ALIGN_RIGHT, height=2.6)
     winch_x, winch_y = paper(*MAIN_WINCH)
-    D.leader(figure, (winch_x, winch_y), (winch_x + 9, winch_y + 7), "主卷扬", height=2.6)
+    D.leader(figure, (winch_x, winch_y), (winch_x + 9, winch_y + 7), "主起升卷筒", height=2.6)
 
     # 主臂：文字在臂上侧，引线指向臂中段
     mid = 0.55
@@ -743,11 +744,22 @@ def _draw_markers(figure: Figure, paper: _Paper, model: ElevationModel) -> None:
     D.leader(figure, target, (target[0] - 12.0, target[1] + 6.0), "主臂",
              align=ALIGN_RIGHT)
 
-    # 索具
+    # 吊索
     sling_mid = paper((model.radius + model.load_center[0] - model.lug_x) / 2.0,
                       (model.hook_h + model.load_top) / 2.0)
-    D.leader(figure, sling_mid, (sling_mid[0] - 6.0, sling_mid[1] - 2.0), "索具",
+    D.leader(figure, sling_mid, (sling_mid[0] - 6.0, sling_mid[1] - 2.0), "吊索",
              align=ALIGN_RIGHT)
+
+    # 吊物名牌等尺寸链排完再放置，短尺寸的数字可能伸到轮廓附近。
+    x, _ = model.load_center
+    left, bottom = paper(x+model.load_w/2,model.load_bottom)
+    right, top = paper(x-model.load_w/2,model.load_top)
+    label = Text(left+3,bottom+5,"吊物",height=2.6)
+    above_ground = ground+1.5
+    inside = (left+1,max(bottom+1,above_ground),right-1,top-1)
+    outside = (left-70,above_ground,right+70,top+70)
+    figure.add(place_label(figure,nearby_labels(label),bounds=inside)
+               or place_label(figure,nearby_labels(label),bounds=outside) or label)
 
 
 def _geometry(model: ElevationModel, scale: float, derived_angle: bool,
@@ -763,6 +775,7 @@ def _geometry(model: ElevationModel, scale: float, derived_angle: bool,
     _draw_load(canvas, paper, model)
     _draw_dimensions(canvas, paper, model, derived_angle=derived_angle)
     _draw_markers(canvas, paper, model)
+    clear_annotation_lines(canvas)
     return canvas
 
 
@@ -800,7 +813,7 @@ def _load_table_rows(model: ElevationModel, load: dict[str, Any]) -> list[tuple[
     """吊物与吊索表：真实尺寸、重心、四索夹角与受力、推算的起升高度。"""
     rows: list[tuple[str, str]] = [
         ("吊物 L×B×H", f"{model.load_w:.2f}×{model.load_d:.2f}×{model.load_h:.2f} m"),
-        ("吊物重", f"{float(load.get('weight_t') or 0):.2f} t"),
+        ("吊物质量", f"{float(load.get('weight_t') or 0):.2f} t"),
         (
             "重心相对形心",
             f"({model.cg_x:+.2f}, {model.cg_y:+.2f}, {model.cg_z:+.2f}) m",
@@ -815,7 +828,8 @@ def _load_table_rows(model: ElevationModel, load: dict[str, Any]) -> list[tuple[
                     f"{float(item['angle_deg']):.1f}°　{float(item['force_t'])*9.80665:.2f} kN",
                 )
             )
-    rows.append(("所需起升高度", f"{model.hook_h:.2f} m"))
+    required_hook_h = float(load.get("hook_height_m") or model.hook_h)
+    rows.append(("所需吊钩中心离地高度", f"{required_hook_h:.2f} m"))
     return rows
 
 
@@ -837,7 +851,7 @@ def _build_sheet_view(model: ElevationModel, model_notes: list[str],
     # 预留区从图框左线起算，好让分区字母让位（draw_zones 会跳过被占用的段落）
     notes_reserve = (_fx0, fy0, x0 + 130.0, fy0 + 38.0)
     table_w = 84.0
-    table_rows = 11 if cap.get("mode") == "dual" else 10
+    table_rows = 13 if cap.get("mode") == "dual" else 10
     perf_h = 5.2 + 1.2 + 5.2 * table_rows
     load_rows = _load_table_rows(model, load)
     load_h = 5.2 + 1.2 + 5.2 * len(load_rows)
@@ -892,13 +906,13 @@ def _build_sheet_view(model: ElevationModel, model_notes: list[str],
     rated_lift = detail.get("lift_height")
     rows: list[tuple[str, str]] = [
         ("机型", model_name),
-        ("臂长 L", f"{model.boom_len:.2f} m"),
-        ("幅度 R", f"{model.radius:g} m"),
-        ("仰角 a", f"{model.boom_angle:.1f}°"),
-        ("所需吊钩高 H", f"{model.hook_h:.2f} m"),
-        ("额定起升高度", "—" if rated_lift is None else f"{float(rated_lift):.2f} m"),
-        ("该格额定", f"{float(detail.get('rated_load') or 0):g} t"),
-        ("计算荷载", f"{float(detail.get('required') or 0):.2f} t"),
+        ("起重臂长度 L", f"{model.boom_len:.2f} m"),
+        ("工作幅度 R", f"{model.radius:g} m"),
+        ("起重臂仰角 α", f"{model.boom_angle:.1f}°"),
+        ("图示吊钩中心高度 H", f"{model.hook_h:.2f} m"),
+        ("表列起升高度", "—" if rated_lift is None else f"{float(rated_lift):.2f} m"),
+        ("表列额定总起重量", f"{float(detail.get('rated_load') or 0):g} t"),
+        ("计算总起重量", f"{float(detail.get('required') or 0):.2f} t"),
         ("负荷率", f"{float(detail.get('utilization') or 0):.3f}"),
         ("负荷率上限", f"{float(cap.get('limit') or 0):.0%}"),
     ]
@@ -906,7 +920,7 @@ def _build_sheet_view(model: ElevationModel, model_notes: list[str],
         right = cap.get("right") or {}
         rows.extend([
             ("辅吊机型", str(right.get("model") or "")),
-            ("辅吊最远", f"{float(right.get('max_radius') or 0):g} m"),
+            ("辅吊最大工作幅度", f"{float(right.get('max_radius') or 0):g} m"),
             ("辅吊负荷率", f"{float(right.get('utilization') or 0):.3f}"),
         ])
     perf_rect = S.perf_table(figure, table_rect[2], table_rect[3], rows, width=table_w)
@@ -918,11 +932,10 @@ def _build_sheet_view(model: ElevationModel, model_notes: list[str],
     angles = [float(item["angle_deg"]) for item in slings]
     forces = [float(item["force_t"])*9.80665 for item in slings]
     notes = [
-        f"比例 1:{denom_value}（A3 竖幅），单位 m；R 量至吊钩中心，额定值按第 7 条取下一档。",
+        f"比例 1:{denom_value}（A3 竖幅），单位 m；R 为回转中心至吊钩中心的水平距离。",
         f"吊物按真实尺寸 {model.load_w:.2f}×{model.load_d:.2f}×{model.load_h:.2f} m 绘制，"
         f"宽 {model.load_d:.2f} m 为出图面方向。",
-        f"所需起升高度 {model.hook_h:.2f} m = 净空 {max(model.load_bottom, 0.0):.2f} m + "
-        f"吊物高 {model.load_h:.2f} m + 捆扎后索具净高 {model.sling_drop:.2f} m。",
+        "H 为图示吊钩中心离地高度。",
     ]
     if slings:
         if max(angles) - min(angles) < 0.05:
@@ -930,13 +943,13 @@ def _build_sheet_view(model: ElevationModel, model_notes: list[str],
         else:
             angle_text = f"四索与竖直夹角 {min(angles):.1f}°~{max(angles):.1f}°"
         if max(forces) - min(forces) < 0.005:
-            force_text = f"名义索力均为 {forces[0]:.2f} kN"
+            force_text = f"名义吊索拉力均为 {forces[0]:.2f} kN"
         else:
             force_text = (
-                f"名义索力 {min(forces):.2f}~{max(forces):.2f} kN（重心偏心使四索受力不均）"
+                f"名义吊索拉力 {min(forces):.2f}~{max(forces):.2f} kN（重心偏心使四索受力不均）"
             )
         notes.append(f"{angle_text}，{force_text}。")
-    notes.append("圆+双弧为形心/重心符号；本图为能力反查示意，不作为施工依据。")
+    notes.append("圆加双弧为形心与重心的图示符号。本图用于起重能力校核。")
     notes.extend(model_notes)
     if cap.get("mode") == "dual":
         notes.append("双机抬吊：图示按主吊工况，辅吊见性能表。")
@@ -951,7 +964,7 @@ def _build_sheet_view(model: ElevationModel, model_notes: list[str],
         subtitle=model_name,
         scale_text=f"1:{denom_value}",
         drawing_no="LC-01",
-        project="吊装能力反查",
+        project="起重能力校核",
         date="",
     )
 

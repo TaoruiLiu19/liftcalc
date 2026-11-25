@@ -61,7 +61,7 @@ def test_insufficient_hook_data_exits_six_for_both_commands(tmp_path: Path) -> N
                                      "--payload", "10", "--db", str(DB)])
     for outcome in (calc, capability):
         assert outcome.exit_code == 6
-        assert "资料不足" in outcome.stderr and "缺吊钩自重" in outcome.stderr
+        assert "资料不足" in outcome.stderr and "缺吊钩组质量" in outcome.stderr
     assert json.loads(capability.stdout)["verdict"] == json.loads(result_path.read_text("utf-8"))["verdict"] == "N/A"
 
 

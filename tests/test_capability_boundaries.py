@@ -26,7 +26,7 @@ def test_requested_height_and_radius_use_the_same_chart_cell():
     conditions = dict(required=10, limit=.9, height=14, radius=None, config="A", hook_known=True)
     best, rows, status, _ = assess_single(points, **conditions)
     assert status == "满足" and best.max_radius == 8
-    assert [row["reason"] for row in rows] == ["满足", "钩高不足"]
+    assert [row["reason"] for row in rows] == ["满足", "起升高度不足"]
     assert assess_single(points, **{**conditions, "radius": 9})[2] == "资料不足"
     assert assess_single(points, **{**conditions, "hook_known": False})[2] == "资料不足"
     best, _, status, _ = assess_single(points, **{**conditions, "radius": 9, "height": None})
@@ -121,7 +121,7 @@ def test_main_hook_options_follow_model_and_limit_suspended_load(repo: Repo) -> 
     assert (cap["hook_mass"], cap["hook_rated_t"]) == (.735, 75)
     assert cap["hook_source_ref"].endswith("#page=4")
     overloaded = run_case({**case, "payload": 74, "rigging": 1}, repo).aux["capability"]
-    assert overloaded["status"] == "不满足" and "主钩额载" in overloaded["explanation"]
+    assert overloaded["status"] == "不满足" and "主吊钩组额定起重量" in overloaded["explanation"]
 
     case["crane"] = {"brand": "三一", "model": "STC750"}
     assert run_case(case, repo).aux["capability"]["status"] == "资料不足"

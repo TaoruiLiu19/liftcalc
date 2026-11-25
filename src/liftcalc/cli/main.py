@@ -190,10 +190,10 @@ def crane_validate(
 @app.command("capability")
 def capability_cmd(
     model: str = typer.Option(..., "--model", help="机型，如 QY70K-1"),
-    payload: float = typer.Option(..., "--payload", help="吊件重量 t"),
-    hook: float = typer.Option(0.0, "--hook", help="吊钩重量 t"),
-    rigging: float = typer.Option(0.0, "--rigging", help="索具重量 t"),
-    dynamic_factor: float = typer.Option(1.1, "--dynamic-factor"),
+    payload: float = typer.Option(..., "--payload", help="吊物质量（t）"),
+    hook: float = typer.Option(0.0, "--hook", help="吊钩组质量（t）"),
+    rigging: float = typer.Option(0.0, "--rigging", help="吊具及索具质量（t）"),
+    dynamic_factor: float = typer.Option(1.1, "--dynamic-factor", help="索具动载系数"),
     brand: str = typer.Option("徐工", "--brand"),
     mode: str = typer.Option("single", "--mode", help="single 或 dual"),
     second_model: str | None = typer.Option(None, "--second-model", help="双机时的第二台机型"),
@@ -202,29 +202,29 @@ def capability_cmd(
         None, "--left-share", help="主吊承担比例（不给时按重心位置分配，无重心信息则兜底 0.6）"
     ),
     asynchronism: float = typer.Option(1.0, "--asynchronism", help="不同步系数"),
-    target_radius: float | None = typer.Option(None, "--target-radius", "--radius", help="单机指定作业幅度 m"),
+    target_radius: float | None = typer.Option(None, "--target-radius", "--radius", help="单机指定工作幅度（m）"),
     config: str | None = typer.Option(None, "--config", help="限定单机性能表配置，传入完整配置名"),
     required_height: float | None = typer.Option(
-        None, "--required-height", help="手动指定所需起升高度 m（默认由吊物高+吊索高推算）"
+        None, "--required-height", help="所需吊钩中心离地高度（m）。默认由吊物底面离地高度、吊物高度及顶面至吊钩中心的竖向距离相加"
     ),
     load_length: float | None = typer.Option(
         None, "--load-length", "--load-width", help="吊物长 m（立面内、沿幅度方向）"
     ),
-    load_depth: float | None = typer.Option(None, "--load-depth", help="吊物宽 m（垂直立面方向）"),
+    load_depth: float | None = typer.Option(None, "--load-depth", help="吊物宽 m（垂直于立面的方向）"),
     load_height: float | None = typer.Option(None, "--load-height", help="吊物高 m"),
-    cg_x: float | None = typer.Option(None, "--cg-x", help="重心相对形心的 x 偏心 m（沿长度，指向远离吊车为正）"),
+    cg_x: float | None = typer.Option(None, "--cg-x", help="重心相对形心的 x 偏心 m（沿长度，指向远离起重机为正）"),
     cg_y: float | None = typer.Option(None, "--cg-y", help="重心相对形心的 y 偏心 m（沿宽度）"),
     cg_z: float | None = typer.Option(None, "--cg-z", help="重心相对形心的 z 偏心 m（向上为正）"),
-    sling_height: float | None = typer.Option(None, "--sling-height", help="吊索竖直高度 m（吊钩中心到吊点）"),
+    sling_height: float | None = typer.Option(None, "--sling-height", help="吊物顶面至吊钩中心的竖向距离（m）"),
     lug_inset: float | None = typer.Option(None, "--lug-inset", help="吊点自顶面四角向内收进 m"),
     dual_left_x: float | None = typer.Option(None, "--dual-left-x", help="双机左吊点在吊物上的 x 坐标 m"),
     dual_right_x: float | None = typer.Option(None, "--dual-right-x", help="双机右吊点在吊物上的 x 坐标 m"),
-    clearance: float | None = typer.Option(None, "--clearance", help="吊物底距地净空 m"),
+    clearance: float | None = typer.Option(None, "--clearance", help="吊物底面离地高度（m）"),
     limit: float | None = typer.Option(None, "--limit", help="负荷率上限（默认单机 0.9 / 双机 0.8）"),
     out: Path | None = typer.Option(None, "--out", "-o"),
     db: Path = typer.Option(Path("data/liftcalc.sqlite"), "--db"),
 ) -> None:
-    """反查：给定吊重，能不能吊、最远多少米、多高。"""
+    """按起重性能表校核起重量、工作幅度及可用的起升高度数据。"""
     case: dict[str, Any] = {
         "kind": "crane.capability",
         "mode": mode,

@@ -1,10 +1,10 @@
-# liftcalc · 汽车吊单机校核与双机上轨
+# liftcalc · 单机吊装校核与双机抬吊上轨
 
-liftcalc 是 Windows 吊装计算工作台。单机模式按车型、臂长和工作幅度查原厂主臂性能表，核对负荷率与钩高。双机模式面向列车上轨，按吊点和重心计算两端分载，搜索两台固定吊机的站位与吊物转向路径，标出沿途的超限和待核区间。
+liftcalc 是在 Windows 本地运行的吊装计算工作台。单机模式按原厂起重性能表校核起重量、工作幅度和有资料支持的起升高度。双机模式按选定吊点与重心计算分载，搜索两台起重机的固定站位和吊物的水平转运轨迹，并标明超限或待核区间。
 
-[启动工作台](#启动工作台) · [单机吊装](#单机吊装) · [双机上轨](#双机上轨) · [算例验证](#算例验证) · [机型与数据](#机型与数据) · [命令行](#命令行)
+[启动工作台](#启动工作台) · [单机吊装](#单机吊装) · [双机抬吊上轨](#双机抬吊上轨) · [算例验证](#算例验证) · [机型与数据](#机型与数据) · [代码架构](#代码架构) · [命令行](#命令行) · [开发与复验](#开发与复验)
 
-![工作台首页，可选择单机吊装或双机上轨](docs/handover/assets/mode-home.png)
+![工作台首页](docs/handover/assets/mode-home.png)
 
 ## 启动工作台
 
@@ -22,35 +22,32 @@ python -m venv .venv
 
 ## 单机吊装
 
-1. **吊物与重心**　输入吊件质量、长宽高、重心偏移及吊点内缩。固定轴测图显示四个吊点，修改重心的水平位置后，吊钩随之移到重心正上方。
-2. **车型与工况**　选择实车型号、配置和主钩，录入索具重量。可指定幅度，也可反查满足输入条件的最远表档。结果页显示采用的表档、额载、负荷率及钩高资料。
+1. **吊物与重心**　输入吊物质量、长宽高、重心坐标和吊点内缩。轴测图显示四个吊点，吊钩的水平位置与重心投影一致。
+2. **机型与工况**　从按标称最大起重量排序的机型列表选车，再选择起重性能表工况及实际安装的主吊钩组。界面同时给出当前选表范围内的最大表列额定总起重量。
+3. **计算与出图**　可指定工作幅度，也可反查满足条件的最大表列工作幅度。结果显示采用的额定总起重量、负荷率、所需吊钩中心离地高度和表列起升高度。
 
-**索具捆扎后高度**取拉紧后吊点平面至钩中心的竖直距离。若现场从吊物底面量起，请在界面选底面基准，再填包含吊物的总高。例如，吊物高 3 m、顶面至钩中心 2 m、底面离地 1 m，所需钩高为 **6 m**。单机也支持按吊点几何估算索高。
+所需吊钩中心离地高度为吊物底面离地高度、吊物高度与吊物顶面至吊钩中心的竖向距离之和。输入时也可切换到从吊物底面量取，或按四吊点几何估算顶面至吊钩中心的距离。
 
-**怎样读结果**　单机计算荷载为吊件质量 + 钩重 + 索具质量 × 动载系数。工作幅度介于两档时，按同一配置和臂长中较大的幅度档核载。若要求核对指定位置的钩高，缺少该位置的高度数据会列为资料不足。换算四索张力时，工作台同时给出名义值和每根索的静力范围；各根索的上限可能出现在不同的受力状态。
+单机计算总起重量为 **吊物质量 + 吊钩组质量 + 吊索具质量 × 索具动载系数**。指定工作幅度介于两列之间时，按同一工况和臂长内较大的表列幅度校核负荷率。若需要校核指定工作幅度下的起升高度，缺少对应资料时会提示资料不足。四索受力结果以 kN 显示名义拉力及各索静力平衡范围，各索的上限可对应不同的平衡状态。
 
-点击 A3 立面图可放大，按住左键拖动，滚轮缩放。单机支持导出 DXF、SVG、PNG 和 Word 计算书。只读 CAD 查看器可打开本次导出的 DXF 或 32 MB 以内的本地 DXF。[单机结果截图](docs/handover/assets/refract-result.png) · [CAD 查看器截图](docs/handover/assets/refract-cad.png)
+单机支持导出 DXF、SVG、PNG 和 Word 计算书。图纸可放大、拖动和平移，CAD 查看器可以只读打开本次 DXF 或 32 MB 以内的本地 DXF。[CAD 查看器截图](docs/handover/assets/refract-cad.png)
 
-## 双机上轨
+## 双机抬吊上轨
 
 | 步骤 | 操作与结果 |
 |---|---|
-| 1 · 吊物与吊点 | 在车体局部 XY 图上放置吊点 A、B 和重心 G，输入两侧索具捆扎后高度。调整任一吊点、重心或质量，即可查看两机各自分担的吨数和百分比。水平悬吊要求 G 的水平投影落在 AB 线段内部，位于中点时两侧各分担 50%。 |
-| 2–3 · A 机、B 机工况 | 分别选择车型、固定臂长、配置与主钩。填写含支腿的矩形占地；选车时可查看两台车的预排位置。 |
-| 4 · 转向与场地 | 指定起吊与落位姿态、障碍和要求的平面净距。默认自动搜索站位及中间转向路径；已有实测站位时可锁定机位，继续搜索吊物路径。 |
-| 5 · 图纸与校核 | 同窗查看静力分析图和俯视轨迹图，可分别放大或导出 DXF。静力图用于读两端分载、力臂、索高和钩高；轨迹回放用于定位限制区间及对应障碍或机位。 |
+| 1 · 吊物、吊点与重心 | 在吊物的局部坐标系内选择吊点 A、B 和重心 G。修改吊点、重心或质量时，界面即时显示两台起重机各自承担的质量和比例。 |
+| 2–3 · A 机和 B 机工况 | 为两机分别选择机型、起重性能表工况和固定臂长。机型标注标称最大起重量，选定工况和臂长后显示相应的最大表列值。填写吊钩组和吊索具参数，以及含展开支腿的占地包络。 |
+| 4 · 转运与场地 | 填写起吊与轨道落位姿态、圆形障碍物、水平净距要求及轨距。可以自动搜索两机站位，也可以锁定实测站位再搜索轨迹。图纸的离地高度和两侧吊钩竖向距离为选填示意尺寸。 |
+| 5 · 图纸与校核 | 查看每台机的分载、工作幅度上界、负荷率和最小水平净距下界。不通过与待核项按轨迹区间显示，点击问题可定位回放。搜索未生成可用轨迹时，页面列出记录到的阻碍。 |
 
-每台吊机的查表总吊重为 **（该端分载质量 + 本侧索具质量）× 输入放大系数 + 本侧钩重**。软件逐段检查工作幅度所跨表档、可用钩高和二维扫掠净距。默认负荷率限值为单机 90%、双机每台 80%，属于项目判定参数。
+**分载**按水平刚体和两根竖向吊索求静力平衡。若 G 的水平投影 P 在 A、B 连线上且严格位于两点之间，则 A 侧分担比例为 PB / AB，B 侧为 AP / AB。起吊后两机固定，计算使用用户选定的两个吊点和重心。
 
-出现已知超载或相交时，结果标为超限。缺少全段钩高资料或保守净距下界不足以证明满足要求时，该项标为待核。搜索得到的轨迹需结合实车允许回转区域、地基、三维干涉及动作时序另行复核。转向模型采用水平刚体和竖向吊力，适用于悬空转运阶段。
+每台机的计算总起重量为 **（本机分担的吊物质量 + 本侧吊索具质量）× 载荷放大系数 + 本机吊钩组质量**。双机校核范围为承载、工作幅度和水平位置，包括占地、障碍与起重臂水平投影包络的净距。起升高度及起升、下放过程需另行校核。默认负荷率上限为单机 90% 和双机每台 80%，是软件采用的项目判定参数。
 
-[吊点与重心编辑页](docs/handover/assets/transfer-points.png) · [静力图 DXF](docs/handover/assets/01-static.dxf) · [轨迹图 DXF](docs/handover/assets/02-trajectory.dxf) · [12 m 列车演示输入](cases/rail-transfer-demo.json)
+**图纸**包括同一比例的第一角法静力三视图、带轨道和站位的转运轨迹平面图，以及 A、B 两机各自的 P0 起吊端视图。静力图按长、高、宽对齐并保留吊点与分载标注。两张端视图沿用单机的车身、主臂、起升钢丝绳和吊索画法。图纸支持放大及导出 DXF。
 
-在 A、B 机工况页可分别填写允许最大工作幅度。规划器同时比较预设路径与平面位姿格网上自由平移、转动的路径。同等校核状态和问题数下，先压低两机较大的峰值幅度上界，再比较另一台的上界。结果页显示两侧峰值上界及其所在区间。对于窄通道，程序会尝试更小的转角和平移步长，并在接近要求净距的区间加密校核。对已通过的自动路线，程序还会调整转向时机，在保持每台车峰值幅度和最高负荷率上界的条件下增加净距。可复算 [6 t 列车、机位锁定、净距至少 1 m 的工况](cases/rail-transfer-1m-clearance.json)。模型与实算数据见[双机幅度优化对照](cases/README.md#双机幅度优化对照)。
-
-自动站位会比较对齐和错位布局，也会按圆形障碍与支腿矩形分别移动两台车的候选机位；起吊后两机固定。[自动避障站位算例](cases/rail-transfer-auto-stagger.json)
-
-列车可以斜着穿过两机空隙。轨迹图在形心首次穿过两回转中心连线的位置叠画车体，分别标注车体纵轴和形心行进方向相对连线法向的角度。[斜穿算例](cases/rail-transfer-oblique.json)
+[12 m 列车演示](cases/rail-transfer-demo.json) · [自动避障站位](cases/rail-transfer-auto-stagger.json) · [斜穿两机间隙](cases/rail-transfer-oblique.json) · [固定站位、净距至少 1 m](cases/rail-transfer-1m-clearance.json)
 
 ## 算例验证
 
@@ -66,7 +63,9 @@ python -m venv .venv
 
 ## 机型与数据
 
-随库有主臂性能数据的车型共 **27 款、730 组配置、11,285 个格点**，含徐工、三一、中联的汽车吊，以及徐工 QAY200/QAY300 全地面起重机。车型吨级从 25 t 到 300 t。查表时须匹配实车配重、支腿状态、伸缩组合、允许作业方位及所装主钩。
+桌面工作台使用随仓库提供的 CSV 数据包，共收录 **27 款机型、730 组配置、11,285 个额载格点**。机型涵盖徐工、三一、中联的汽车起重机，以及徐工 QAY200/QAY300 全地面起重机，标称吨位为 25–300 t。查表按实车配重、支腿状态、伸缩组合、允许作业方位及所装主吊钩组选取工况。
+
+CLI 默认读取随仓库提交的 SQLite 快照。要在 CLI 使用桌面端的完整机型数据，可按[开发与复验](#开发与复验)中的命令重建数据库，或用 `--db` 指向另建的数据库。
 
 <details>
 <summary>展开车型清单、格点数及原厂表页</summary>
@@ -143,7 +142,7 @@ XCT130L8_1、STC800C5-8、STC500C5-8 共 11 处小幅度段额定值回增，
 
 </details>
 
-QAY300、QAY500 尚缺可用的主臂性能数据。遇到“缺吊钩自重”时，请先选择已安装的主钩；库中缺少该钩时，按实车铭牌填写自重，并复核吊钩额载和穿绳倍率。例如 800 kg 对应 0.8 t。[车型数据源](src/liftcalc/data/pack/crane)
+遇到“缺吊钩组质量”时，可选择已安装的主吊钩组，或按实车铭牌填写吊钩组质量。800 kg 对应 0.8 t。吊钩组额定起重量和穿绳倍率按实车核对。[车型数据源](src/liftcalc/data/pack/crane)
 
 ## 命令行
 
@@ -157,22 +156,77 @@ QAY300、QAY500 尚缺可用的主臂性能数据。遇到“缺吊钩自重”�
 
 按默认索具动载系数 1.1，总吊重为 **10.946 t**。该表格点额载 **15.5 t**、钩高 **24.43 m**，负荷率 **70.62%**。本例的 `draw` 命令生成三份 DXF，`out\cap-2.dxf` 是吊装立面图。省略 `--target-radius` 可反查最远可用幅度。更多参数见 `.\liftcalc.ps1 capability --help`。
 
-CLI 的 `capability --mode dual` 用于一个给定工况的双机分载；连续转向轨迹使用桌面首页的“双机上轨”。批处理可读取 `$LASTEXITCODE`。对于 `capability`，**0 表示满足，1 表示不满足，6 表示资料不足**。这三种结果在传入 `--out` 时均写入 JSON。其余错误码为 2（输入或参数）、3（数据库或基础数据）、4（超出定义域）和 5（内部或启动错误）。
+CLI 的 `capability --mode dual` 提供静态分载及两台起重机各自的工作幅度反查。连续转运轨迹使用桌面首页的“双机抬吊上轨”。批处理可读取 `$LASTEXITCODE`。对于 `capability`，**0 表示满足，1 表示不满足，6 表示资料不足**。这三种结果在传入 `--out` 时均写入 JSON。其余错误码为 2（输入或参数）、3（数据库或基础数据）、4（超出定义域）和 5（内部或启动错误）。
+
+## 代码架构
+
+### 分层与数据流
+
+```mermaid
+flowchart LR
+    UI["Vue 工作台"] --> Bridge["DesktopApi / BrowserApi"]
+    CLI["Typer 命令行"] --> Service["services.run_case"]
+    Bridge -->|单机| Service
+    Bridge -->|双机抬吊上轨| Transfer["Transfer 校验与 plan_transfer"]
+    Service --> Kernel["计算内核"]
+    Transfer --> Search["站位候选与位姿格网"]
+    Search --> Analyze["连续区间校核"]
+    Kernel --> Repo["只读 Repo / SQLite"]
+    Analyze --> Repo
+    Service --> Result["ComputationResult"]
+    Analyze --> Route["站位、位姿、区间与证据"]
+    Result --> Draw["Figure 矢量图元"]
+    Route --> Draw
+    Draw --> Files["SVG / PNG / DXF"]
+    Result --> Report["Word 计算书"]
+    Route --> UI
+```
+
+| 层 | 主要入口 | 职责与接口 |
+|---|---|---|
+| 工作台界面 | [App.vue](frontend/src/App.vue)、[TransferPane.vue](frontend/src/TransferPane.vue) | 收集单机或双机输入，维持工况步骤和计算快照。[craneModels.ts](frontend/src/craneModels.ts) 按品牌和机型分组并按标称吨位排列。[TransferResults.vue](frontend/src/TransferResults.vue) 归并连续的问题区间，[TransferPlot.vue](frontend/src/TransferPlot.vue) 显示平面位姿并定位回放。 |
+| 桌面宿主 | [dusk.py](src/liftcalc/dusk.py) | `DesktopApi` 提供机型列表、计算及图纸导出。原生窗口经 pywebview 调用。浏览器回退模式由 Bottle 本地服务承载同一套页面，`BrowserApi` 复用计算逻辑。接口为图纸分配导出标识，预览和导出使用同一份图元。 |
+| CLI 与服务层 | [cli/main.py](src/liftcalc/cli/main.py)、[services/cases.py](src/liftcalc/services/cases.py)、[services/calc.py](src/liftcalc/services/calc.py) | CLI 读取 JSON 或 YAML 工况，`run_case` 按工况类型校验并调度。输出结构由 [core/result.py](src/liftcalc/core/result.py) 定义，其中 `CheckResult` 记录单项判定、代入值、单位及数据来源，`ComputationResult` 汇总校核项、警告和出图数据。 |
+| 计算内核 | [crane/](src/liftcalc/crane)、[lifting/](src/liftcalc/lifting)、[geometry/](src/liftcalc/geometry) | 起重性能表校核、吊物及索力、吊耳、吊梁与几何计算。[sections/](src/liftcalc/sections)、[fea/](src/liftcalc/fea) 和 [codecheck/](src/liftcalc/codecheck) 分别处理截面、平面杆系和构件校核。 |
+| 数据层 | [data/importer.py](src/liftcalc/data/importer.py)、[schema.sql](src/liftcalc/data/schema.sql)、[data/repo.py](src/liftcalc/data/repo.py) | 从 CSV 建 SQLite 库。只读 `Repo` 按品牌、机型、工况和臂长查询离散表值，另向界面提供标称吨位、主吊钩组及各臂长的最大表列额定总起重量。 |
+| 图纸与计算书 | [drawing/](src/liftcalc/drawing)、[report/render.py](src/liftcalc/report/render.py) | 将结果转换为图件或 Word。SVG、PNG、DXF 共用图元、图层、尺寸和标注位置。 |
+
+### 单机计算链
+
+1. 桌面和 CLI 都将单机输入交给 `run_case`。服务层解析吊物尺寸、四个吊点和重心，调用 [lifting/load_geometry.py](src/liftcalc/lifting/load_geometry.py) 求索力和所需吊钩中心离地高度。
+2. [crane/capability.py](src/liftcalc/crane/capability.py) 对候选工况逐项核对吊钩组、负荷率和可用的起升高度资料。反查从满足条件的表列工作幅度中选择最大值，指定工作幅度时按同一工况和臂长查表。
+3. 服务层将采用的工况、绘图参数和警告装入 `ComputationResult`。立面图和计算书据此展示图示尺寸和校核结果。
+
+### 双机站位搜索、转运与校核
+
+1. [crane/transfer.py](src/liftcalc/crane/transfer.py) 中的 `Transfer` 校验吊点、重心与场地输入，`shares` 求静力分载。每个吊物位姿由场地平面上的形心 X、Y 与纵轴方向角组成。
+2. `plan_transfer` 在实测机位或自动生成的对齐、错位、避障机位上比较直接、分段转向和格网候选路径。[transfer_search.py](src/liftcalc/crane/transfer_search.py) 的 `lattice_routes` 用优先队列搜索平移及转动组合，优先压低路径中的最大工作幅度。
+3. `analyze` 对各段插值轨迹计算两侧工作幅度包络、负荷率和水平净距下界，必要时细分临界区间。候选按校核状态、问题数量、两机峰值幅度上界等排序。对于满足所列校核的路径，`improve_clearance` 在维持每侧幅度和负荷率上界的条件下尝试增大净距。
+4. 桌面接口返回选定站位、位姿节点与分段状态。已确认的超载或相交可以带具体采样位置和数值证据，区间资料不足时标为待核。搜索未生成可用路径时返回记录到的阻碍。搜索范围和格网精度有限，结果适用于水平悬空转运的复核。
+
+### 共用绘图流程
+
+单机由 [drawing/figures.py](src/liftcalc/drawing/figures.py) 生成 A3 立面与性能表，双机由 [drawing/transfer.py](src/liftcalc/drawing/transfer.py) 生成静力三视图、轨迹图和两张起吊端视图。车身线稿由 [body.py](src/liftcalc/drawing/body.py) 共用，主臂、起升钢丝绳和吊钩组复用立面绘制逻辑。模型尺寸统一转换为图面 mm。[dim.py](src/liftcalc/drawing/dim.py) 生成尺寸与引线，[annotation.py](src/liftcalc/drawing/annotation.py) 为文字避让轮廓并在辅助线上留出字框间隙。[sheet.py](src/liftcalc/drawing/sheet.py) 和 [style.py](src/liftcalc/drawing/style.py) 管理图幅和图层样式。
+
+渲染器消费 [primitives.py](src/liftcalc/drawing/primitives.py) 中的 `Figure`、线段、圆、多段线和文字，分别输出 [SVG](src/liftcalc/drawing/svg.py)、[PNG](src/liftcalc/drawing/png.py) 或 [DXF](src/liftcalc/drawing/dxf.py)。桌面端以 SVG 预览，MLightCAD 负责只读 DXF 查看。Vite 把 Vue 页面、样式和 CAD 工作线程打包到 [dusk_static](src/liftcalc/dusk_static)，运行时可离线读取。
 
 ## 开发与复验
 
 计算内核使用 Python，工作台使用 Vue 3、TypeScript 和 Vite，只读 CAD 预览使用 MLightCAD。前端构建产物已随仓库提供。
 
 ```powershell
-# 安装测试依赖并复跑对照算例
+# 安装测试依赖并运行完整测试
 .\.venv\Scripts\python.exe -m pip install -e ".[desktop,dev]"
-.\.venv\Scripts\python.exe -m pytest tests/test_reference_lifts.py
+.\.venv\Scripts\python.exe -m pytest
 
 # 变更前端后，在 frontend 目录构建
-cd frontend
+Push-Location frontend
 pnpm install --frozen-lockfile
 pnpm run build
+Pop-Location
 ```
+
+回归测试覆盖 [数据导入](tests/test_data.py)、[单机工况判定](tests/test_capability_boundaries.py)、[双机分载和轨迹](tests/test_rail_transfer.py)、[图纸比例及标注](tests/test_drawing.py) 和 [工程对照算例](tests/test_reference_lifts.py)。提交 Vue 源码改动时一并提交重建后的 `dusk_static`。
 
 修改机型数据时，在 `src/liftcalc/data/pack/crane` 维护车型及性能表 CSV，同臂长的不同伸缩组合用 `config` 区分。在仓库根目录重建并校验 CLI 数据库。
 

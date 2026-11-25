@@ -93,24 +93,31 @@ class DesktopApi:
 
     def calculate(self, case):
         if case.get("kind") == "rail.transfer":
-            from liftcalc.crane.transfer import Transfer, plan_transfer
+            from liftcalc.crane.transfer import DUAL_LIMIT, RouteTooLong, Transfer, TransferSearchError, plan_transfer
             from liftcalc.drawing.transfer import sheets
 
             inputs = Transfer.model_validate(case["transfer"])
-            inputs, result = plan_transfer(inputs, self._repo)
+            try:
+                inputs, result = plan_transfer(inputs, self._repo, diagnostics=True)
+            except (TransferSearchError, RouteTooLong) as exc:
+                with self._lock:
+                    self._transfer_sheets = {}
+                return {"status": "unplanned", "summary": str(exc),
+                        "reasons": list(exc.reasons) if isinstance(exc, TransferSearchError) else []}
             drawings = sheets(inputs, result)
             tokens = [uuid.uuid4().hex for _ in drawings]
             previews = [dict(id=token, title=sheet.title, kind=sheet.meta["kind"], svg=to_svg(sheet, margin=0))
                         for token, sheet in zip(tokens, drawings, strict=True)]
             with self._lock:
                 self._transfer_sheets = dict(zip(tokens, drawings, strict=True))
-            return {**result, "poses": inputs.route,
+            return {**result, "status": "planned", "poses": inputs.route,
+                    "required_clearance": inputs.plan_clearance, "load_limit": DUAL_LIMIT,
                     "stations": [dict(center=c.center, heading=c.heading) for c in inputs.cranes],
                     "drawings": previews}
         if case.get("kind") != "crane.capability" or case.get("mode", "single") != "single":
             raise ValueError("此工作台仅支持单机")
         if not 0 < float(case.get("limit", .9)) <= 1 or not float(case["payload"]) > 0:
-            raise ValueError("吊件重量须为正，负荷率上限须在 (0, 1] 内")
+            raise ValueError("吊物质量须为正，负荷率上限须在 (0, 1] 内")
         result = run_case(case, self._repo)
         sheet = elevation_figure(result)
         token = uuid.uuid4().hex

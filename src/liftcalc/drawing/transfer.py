@@ -2,16 +2,20 @@
 import math
 from itertools import accumulate
 
-from liftcalc.crane.transfer import Box, world
+from liftcalc.crane.transfer import world
 from liftcalc.drawing import dim
+from liftcalc.drawing.annotation import clear_annotation_lines, nearby_labels, place_label
 from liftcalc.drawing.body import BODY_MODEL_FRONT, MODEL_REAR, draw_truck, drawing_axles
 from liftcalc.drawing.figures import (
-    BLOCK_GAP, BLOCK_H, BOOM_HEAD_REACH, ElevationModel, _Paper, _draw_boom,
-    _draw_hook_block, _draw_luffing_cylinder, _draw_rope,
+    BOOM_HEAD_REACH, HINGE_H, LIFT_SHEAVE_RADIUS, ElevationModel, _Paper,
+    _draw_boom, _draw_hook_block, _draw_luffing_cylinder, _draw_rope,
 )
 from liftcalc.drawing.primitives import ALIGN_CENTER, ALIGN_RIGHT, Circle, Figure, Line, Polyline, Text
-from liftcalc.drawing.sheet import Sheet, draw_frame, draw_ground, overlaps, title_block
-from liftcalc.drawing.style import LAYER_TRACE_A, LAYER_TRACE_B, LAYER_TRACE_CENTER, LAYER_TRACE_GATE, SCALE_LADDER
+from liftcalc.drawing.sheet import Sheet, draw_frame, draw_ground, title_block
+from liftcalc.drawing.style import (
+    LAYER_RIGGING, LAYER_THIN, LAYER_TRACE_A, LAYER_TRACE_B, LAYER_TRACE_CENTER, LAYER_TRACE_GATE,
+    SCALE_LADDER,
+)
 
 
 def drawing(title, number, max_scale, kind):
@@ -20,9 +24,10 @@ def drawing(title, number, max_scale, kind):
                        max(500, math.ceil(1000/max_scale/50)*50))
     fig = Figure(title, page.width, page.height)
     fig.meta["kind"] = kind
+    fig.meta["scale"] = 1000 / denominator
     draw_frame(fig, page)
     title_block(fig, page, title=title, subtitle="A3", scale_text=f"1:{denominator}",
-                drawing_no=f"DT-0{number}", project="列车双机上轨", date="", sheet_no=f"{number}/4")
+                drawing_no=f"DT-0{number}", project="列车双机抬吊上轨", date="", sheet_no=f"{number}/4")
     return fig, 1000/denominator
 
 
@@ -31,72 +36,95 @@ def cross(fig, x, y, r):
 
 
 def statics(case, result, corners):
-    a,b = case.lugs
-    span = math.dist(a,b)
-    ux,uy = (b[0]-a[0])/span,(b[1]-a[1])/span
-    def station(p):
-        return ux*p[0]+uy*p[1]
-    half = max(station(p) for p in corners)
-    hook_z = [case.bottom+case.height+c.sling_height for c in case.cranes]
-    fig,k = drawing("双机抬吊静力图", 1, min(275/(2*half), 193/case.length,
-                                             72/max(hook_z), 56/case.width), "statics")
-    def x(p):
-        return 216+k*station(p)
-    ground = 187
-    y0 = ground+k*case.bottom
-    y1 = y0+k*case.height
-    left,right = 216-k*half,216+k*half
-    fig.add(Text(36,281,"沿 AB 方向投影 · 水平吊运姿态",height=4),
-            Line(left-14,ground,right+14,ground,"THIN"),
-            Polyline(((left,y0),(right,y0),(right,y1),(left,y1))))
-    for j,p in enumerate((a,b)):
-        tag = "AB"[j]
-        top = ground+k*hook_z[j]
-        fig.add(Line(x(p),y1,x(p),top,"RIGGING"),Circle(x(p),top,1.6),
-                Text(x(p)+2,top+4,tag+" 钩",height=3),
-                Circle(x(p),y1,1.2),Text(x(p)+2,y1+3,"F"+tag,height=3))
-        dim.arrow(fig,x(p),y1+min(7,(top-y1)*.8),0,1,layer="RIGGING")
-        side = "left" if j==0 else "right"
-        offset = -1 if j==0 else 1
-        edge = left if j==0 else right
-        dim.v_dim(fig,y1,top,edge+offset*10,f"{case.cranes[j].sling_height:.2f} m",
-                  ref_x=x(p),side=side)
-        dim.v_dim(fig,ground,top,edge+offset*23,f"{tag} 钩高 {hook_z[j]:.2f} m",
-                  ref_x=edge,side=side)
-    gy = y0+k*(case.cg[2]+case.height/2)
-    fig.add(Circle(x(case.cg),gy,1.5),Line(x(case.cg),gy,x(case.cg),gy-9,"RIGGING"),
-            Text(x(case.cg)+2,gy-5,"W",height=3.2))
-    dim.arrow(fig,x(case.cg),gy-9,0,-1,layer="RIGGING")
-    dim.v_dim(fig,y0,y1,right+10,f"H={case.height:.2f} m",ref_x=right,side="right")
-    dim.v_dim(fig,ground,y0,left-10,f"{case.bottom:.2f} m",ref_x=left)
-    for tag,lug in zip("AB",(a,b)):
-        dist = abs(station(lug)-station(case.cg))
-        dim.h_dim(fig,x(lug),x(case.cg),175,f"{tag}G  {dist:.2f} m",ref_y=y0)
-    dim.h_dim(fig,x(a),x(b),163,f"AB  {span:.2f} m",ref_y=y0)
-    fig.add(Text(36,146,"吊点布置 · 顶视",height=4),
-            Polyline(tuple((149+k*u,99+k*v) for u,v in corners)))
-    pts = [(149+k*p[0],99+k*p[1]) for p in (a,b,case.cg)]
+    """First-angle projections of the same horizontal suspended load."""
+    a, b = case.lugs
+    top_z = case.bottom + case.height
+    hook_z = [top_z + crane.sling_height for crane in case.cranes]
+    fig, k = drawing("双机抬吊静力图", 1,
+                     min(262/(case.length+case.width), 145/(max(hook_z)+case.width)), "statics")
+    length, width = k*case.length, k*case.width
+    gap = 49
+    left = 221 - (length + gap + width)/2
+    right = left + length
+    end_left, end_right = right + gap, right + gap + width
+    x_front, x_end = (left+right)/2, (end_left+end_right)/2
+    plan_bottom = 65
+    plan_top = plan_bottom + width
+    y_plan = (plan_bottom+plan_top)/2
+    ground = plan_top + 45
+    y0, y1 = ground+k*case.bottom, ground+k*top_z
+    hook_y = [ground+k*z for z in hook_z]
+    view_title_y = max(hook_y) + 17
+    fig.add(Text(36,281,"吊物水平悬吊 · 第一角画法 · 竖向布置示意",height=4.5))
+
+    # Left view sits to the right of the front view in first-angle projection.
+    # The two mitre points carry the plan width to the horizontal end-view axis.
+    for x in (left, right):
+        dim.dashed(fig,(x,y0-2),(x,plan_top+2),layer=LAYER_THIN)
+    for y in (y0, y1):
+        dim.dashed(fig,(right+2,y),(end_left-2,y),layer=LAYER_THIN)
+    for x,y in ((end_left,plan_top),(end_right,plan_bottom)):
+        dim.dashed(fig,(right+2,y),(x,y),layer=LAYER_THIN)
+        dim.dashed(fig,(x,y),(x,y0-2),layer=LAYER_THIN)
+    dim.dashed(fig,(end_left,plan_top),(end_right,plan_bottom),layer=LAYER_THIN)
+
+    def vertical_view(lo, hi, x_point, title):
+        fig.add(Polyline(((lo,y0),(hi,y0),(hi,y1),(lo,y1))),
+                Line(lo-7,ground,hi+7,ground,LAYER_THIN),
+                Text((lo+hi)/2,view_title_y,title,height=4,align=ALIGN_CENTER))
+        positions = [x_point(lug) for lug in (a, b)]
+        same_position = abs(positions[0]-positions[1]) < 1e-6
+        same_hook = same_position and abs(hook_y[0]-hook_y[1]) < 1e-6
+        if same_hook:
+            fig.add(Text(positions[0]+4,hook_y[0]+5,"A、B 吊钩（投影重合）",height=3))
+        for i,(x,y) in enumerate(zip(positions,hook_y)):
+            if same_hook and i == 1:
+                break
+            fig.add(Line(x,y1,x,y,LAYER_RIGGING), Circle(x,y,1.5),
+                    Circle(x,y1,1.0,LAYER_RIGGING))
+            dim.arrow(fig,x,y1+min(6,(y-y1)*.75),0,1,layer=LAYER_RIGGING)
+            if not same_hook:
+                side = -1 if x < positions[1-i] or (same_position and i == 0) else 1
+                align = ALIGN_RIGHT if side < 0 else "left"
+                dim.leader(fig,(x,y),(x+side*5,y+5),f"{'AB'[i]} 吊钩",align=align,height=3,dot=False)
+        gx, gy = x_point(case.cg), y0+k*(case.cg[2]+case.height/2)
+        fg = max(3.5, min(9, (y1-y0)*.35))
+        fig.add(Circle(gx,gy,1.4),Line(gx,gy,gx,gy-fg,LAYER_RIGGING),
+                Text(gx+2,gy-fg+2.5,"W",height=3.2))
+        dim.arrow(fig,gx,gy-fg,0,-1,layer=LAYER_RIGGING)
+
+    vertical_view(left,right,lambda p: x_front+k*p[0],"主视图")
+    vertical_view(end_left,end_right,lambda p: x_end-k*p[1],"左视图 · 吊物端面")
+    dim.v_dim(fig,y0,y1,left-12,f"H={case.height:.2f} m",ref_x=left)
+    dim.v_dim(fig,y0,y1,end_right+12,f"H={case.height:.2f} m",ref_x=end_right,side="right")
+    dim.h_dim(fig,end_left,end_right,ground-13,f"B={case.width:.2f} m",
+              ref_y=y0,above=False)
+
+    def plan(p):
+        return x_front+k*p[0], y_plan+k*p[1]
+
+    fig.add(Polyline(tuple(map(plan,corners))),
+            Text(x_front,plan_top+12,"俯视图",height=4,align=ALIGN_CENTER))
+    pts = [plan(p) for p in (a,b,case.cg)]
     fig.add(Line(*pts[0],*pts[1],"CENTER"))
+    for px,py in pts:
+        fig.add(Circle(px,py,1.4))
+        cross(fig,px,py,2.4)
+    dim.h_dim(fig,left,right,plan_bottom-8,f"L  {case.length:.2f} m",ref_y=plan_bottom)
+    dim.v_dim(fig,plan_bottom,plan_top,left-12,f"B={case.width:.2f} m",ref_x=left)
+
+    for i, (label, value) in enumerate((("AG",math.dist(a,case.cg[:2])),
+                                       ("BG",math.dist(b,case.cg[:2])),("AB",math.dist(a,b)))):
+        fig.add(Text(36+i*66,48,f"{label}  {value:.2f} m",height=3.3))
+    fig.add(Text(36,38,f"A 吊钩中心离地高度 {hook_z[0]:.2f} m",height=3.2),
+            Text(114,38,f"B 吊钩中心离地高度 {hook_z[1]:.2f} m",height=3.2),
+            Text(192,38,f"吊物底面离地  {case.bottom:.2f} m",height=3.2))
+    for i,(label,fraction) in enumerate(zip(("A 吊索拉力 FA","B 吊索拉力 FB","吊物重力 W"),(*result["shares"],1))):
+        fig.add(Text(36+i*72,27,f"{label}  {case.mass*9.80665*fraction:.2f} kN",height=3.3))
     for name,(px,py) in zip("ABG",pts):
-        fig.add(Circle(px,py,1.7),Text(px+2,py+4,name,height=3.2))
-        cross(fig,px,py,3)
-    dim.h_dim(fig,149-k*case.length/2,149+k*case.length/2,60,
-              f"L  {case.length:.2f} m",ref_y=99-k*case.width/2)
-    dim.v_dim(fig,99-k*case.width/2,99+k*case.width/2,149+k*case.length/2+7,
-              f"B={case.width:.2f} m",ref_x=149+k*case.length/2,side="right")
-    fig.add(Text(271,138,"点位坐标 / m",height=4),
-            Text(271,129,"原点为车体形心，Z 向上",height=3))
-    coordinates = [("点","X","Y","Z")]
-    for name,p in zip("ABG",((*a,case.height/2),(*b,case.height/2),case.cg)):
-        coordinates.append((name,*(f"{v:.2f} m" for v in p)))
-    for i,values in enumerate(coordinates):
-        row = 117-i*9
-        for col,value in enumerate(values):
-            fig.add(Text(271+col*26,row,value,height=3))
-    fig.add(Text(271,72,"尺寸单位  m",height=3),
-            Text(271,63,f"车底离地  {case.bottom:.2f} m",height=3))
-    for i,fraction in enumerate((*result["shares"],1)):
-        fig.add(Text(35+i*69,28,f"{('FA','FB','W')[i]}  {case.mass*9.80665*fraction:.2f} kN",height=3.5))
+        label = Text(px+2,py+5,name,height=3.2)
+        fig.add(place_label(fig,nearby_labels(label),bounds=(34,62,406,ground-7)) or label)
+    clear_annotation_lines(fig)
     return fig
 
 
@@ -159,7 +187,6 @@ def trajectory(case, result, corners):
     xs,ys = zip(*bounds)
     fig,k = drawing("双机转运轨迹平面图", 2,
                     min(313/(max(xs)-min(xs)), 178/(max(ys)-min(ys))), "trajectory")
-    geometry_start = len(fig.primitives)
     mx,my = (min(xs)+max(xs))/2,(min(ys)+max(ys))/2
     def paper(p):
         return 219+(p[0]-mx)*k,159+(p[1]-my)*k
@@ -177,8 +204,9 @@ def trajectory(case, result, corners):
     if crossing:
         dim.dash_dot(fig, paper(ca.center), paper(cb.center), layer="NOTE")
         fig.add(Polyline(tuple(paper(world(gate_pose,p)) for p in corners),True,LAYER_TRACE_GATE),
-                Text(36,269,f"首次穿隙 · 车体 {crossing[1]:.1f}°，形心行进 {crossing[2]:.1f}°"
-                     "（以两机中心连线法向为 0°）",height=3.5,layer=LAYER_TRACE_GATE))
+                Text(36,269,f"首次通过两机之间 · 吊物纵轴 {crossing[1]:.1f}°，形心移动方向 {crossing[2]:.1f}°",
+                     height=3.5,layer=LAYER_TRACE_GATE),
+                Text(36,261,"均为与两机回转中心连线法线的夹角",height=3.0,layer=LAYER_TRACE_GATE))
 
     layers = (LAYER_TRACE_A, LAYER_TRACE_B)
     patterns = ((4.5, 2.0), (1.6, 2.1))
@@ -215,16 +243,16 @@ def trajectory(case, result, corners):
                     break
     start, end = centerline[0], centerline[-1]
     fig.add(Circle(*start, 2.0, LAYER_TRACE_CENTER), Circle(*end, 2.0, LAYER_TRACE_CENTER))
-    label = trajectory_labels(fig, geometry_start)
+    label = trajectory_labels(fig)
     label(start, "P0 起吊", LAYER_TRACE_CENTER, below=True, height=4.5)
     label(end, f"P{legs} 落位", LAYER_TRACE_CENTER, height=4.5)
     for tag, crane, layer in zip("AB", case.cranes, layers):
         px, py = paper(crane.center)
         label((px, py), f"{tag} 机", layer, height=4.6)
     if gate_pose:
-        label(paper(gate_pose[:2]), "穿隙姿态", LAYER_TRACE_GATE, height=3.5)
+        label(paper(gate_pose[:2]), "通过两机间隙时的姿态", LAYER_TRACE_GATE, height=3.5)
     for index, (x,y,_) in enumerate(disks, 1):
-        label(paper((x, y)), f"障碍 {index}", "NOTE", height=3.1)
+        label(paper((x, y)), f"障碍物 {index}", "NOTE", height=3.1)
     marked = [start, end]
     for index in sorted({round(legs*fraction) for fraction in (.25, .5, .75)} - {0, legs}):
         point = centerline[index]
@@ -237,139 +265,167 @@ def trajectory(case, result, corners):
     fig.add(Text(36,282,f"P0 起吊  →  P{legs} 落位",height=5),
             Text(403,281,f"回转中心距 {spacing:.2f} m   ·   两机占地净距 {ca.box.distance(cb.box):.2f} m",
                  height=3.6,align=ALIGN_RIGHT),
-            Text(403,269,f"转运净距下界 ≥ {math.floor(result['clearance']['lower_m']*1000)/1000:.3f} m",
+            Text(403,269,f"全程水平净距下界 {math.floor(result['clearance']['lower_m']*1000)/1000:.3f} m",
                  height=3.6,align=ALIGN_RIGHT),
-            Text(36,14,f"车长 {case.length:g} m   ·   车宽 {case.width:g} m   ·   轨距 {case.gauge:g} m",
+            Text(36,14,f"吊物长 {case.length:g} m   ·   吊物宽 {case.width:g} m   ·   轨距 {case.gauge:g} m",
                  height=3.4),
-            Line(36,40,56,40,LAYER_TRACE_CENTER),Text(62,42,"车体形心路径",height=3.8),
-            Text(154,42,"矩形：吊机占地 · 十字：回转中心",height=3.6),
-            Text(154,30,"车体：起吊虚线 / 落位实线",height=3.6),
-            Text(154,18,"圆形：场地障碍",height=3.5))
+            Line(36,40,56,40,LAYER_TRACE_CENTER),Text(62,42,"吊物形心轨迹",height=3.8),
+            Text(154,42,"矩形：起重机占地包络 · 十字：回转中心",height=3.6),
+            Text(154,30,"吊物：起吊虚线 / 落位实线",height=3.6),
+            Text(154,18,"圆形：障碍物禁入区",height=3.5))
     for y, tag, (dash, gap), layer in zip((29, 19), "AB", patterns, layers):
         patterned_path(fig, ((36, y), (56, y)), dash, gap, layer)
-        fig.add(Text(62, y+2, f"吊点 {tag} 路径", height=3.6, layer=layer))
+        fig.add(Text(62, y+2, f"吊点 {tag} 轨迹", height=3.6, layer=layer))
+    clear_annotation_lines(fig)
     return fig
 
 
-def trajectory_labels(fig, geometry_start):
+def trajectory_labels(fig):
     """Place captions near their leader points without covering route strokes."""
-    strokes = []
-    for item in fig.primitives[geometry_start:]:
-        if isinstance(item, Line):
-            points = ((item.x1, item.y1), (item.x2, item.y2))
-        elif isinstance(item, Polyline):
-            points = (*item.points, item.points[0]) if item.closed else item.points
-        else:
-            continue
-        for a, b in zip(points, points[1:]):
-            length = math.dist(a, b)
-            if length > 1e-9:
-                x,y = (a[0]+b[0])/2, (a[1]+b[1])/2
-                dx,dy = (b[0]-a[0])/length, (b[1]-a[1])/length
-                bounds = (min(a[0],b[0]), min(a[1],b[1]), max(a[0],b[0]), max(a[1],b[1]))
-                strokes.append((bounds, (x,y,dx,dy), length))
-
-    used = []
-
     def label(point, content, layer, *, below=False, height=3.8):
         x, y = point
         vertical = -1 if below else 1
         offsets = ((9, vertical*12), (-9, vertical*12), (9, -vertical*12), (-9, -vertical*12),
-                   (16, vertical*21), (-16, vertical*21), (19, -vertical*25), (-19, -vertical*25))
-        fallback = None
-        for dx, dy in offsets:
-            note = Text(x+dx, y+dy, content, height=height, layer=layer,
-                        align=ALIGN_RIGHT if dx < 0 else "left")
-            left, bottom, right, top = bounds = note.bbox()
-            if (not (35 <= left <= right <= 406 and 58 <= bottom <= top <= 260)
-                    or any(overlaps(bounds, other, margin=1.5) for other in used)):
-                continue
-            end = (right + 2 if dx < 0 else left - 2, y+dy-height/2)
-            if fallback is None:
-                fallback = (bounds, end, note)
-            caption = Box(((left+right)/2, (top+bottom)/2), right-left+2, top-bottom+2, 0)
-            if not any(overlaps(bounds, edge, margin=1) and caption.separation(pose, length, 0) <= 0
-                       for edge, pose, length in strokes):
-                fallback = (bounds, end, note)
-                break
-        if fallback:
-            bounds, end, note = fallback
-            used.append(bounds)
-            fig.add(Line(x, y, *end, "NOTE"), note)
+                   (16, vertical*21), (-16, vertical*21), (19, -vertical*25), (-19, -vertical*25),
+                   (28, vertical*33), (-28, vertical*33), (28, -vertical*33), (-28, -vertical*33))
+        candidates = (Text(x+dx,y+dy,content,height=height,layer=layer,
+                           align=ALIGN_RIGHT if dx < 0 else "left") for dx,dy in offsets)
+        note = place_label(fig,candidates,bounds=(35,58,406,260))
+        if note:
+            left,_,right,_ = note.bbox()
+            end_x = right+2 if note.align == ALIGN_RIGHT else left-2
+            fig.add(Line(x,y,end_x,note.y-height/2,"NOTE"), note)
 
     return label
 
 
-def crane_elevation(case, result, corners, side):
-    """Project the train onto the vertical plane through this crane and its hook."""
-    crane, lug = case.cranes[side], case.lugs[side]
+def draw_end_view_profile(fig, paper, profile, center, factor):
+    def project(x, z):
+        # The temporary drawing uses _Paper's reversed horizontal axis.
+        return paper(center-x*factor, z)
+
+    for item in profile.primitives:
+        if isinstance(item, Line):
+            fig.add(Line(*project(item.x1, item.y1), *project(item.x2, item.y2), item.layer))
+        elif isinstance(item, Polyline):
+            fig.add(Polyline(tuple(project(x, z) for x, z in item.points), item.closed, item.layer))
+        elif isinstance(item, Circle):
+            if abs(factor) == 1:
+                fig.add(Circle(*project(item.cx,item.cy),item.r*paper.s,item.layer))
+            else:
+                angles = (i*math.tau/24 for i in range(24))
+                points = tuple(project(item.cx+item.r*math.cos(a), item.cy+item.r*math.sin(a)) for a in angles)
+                fig.add(Polyline(points, True, item.layer))
+
+
+def crane_elevation(case, result, side):
+    """Show one crane in the transverse elevation of the initial lift."""
     tag = "AB"[side]
-    times = (t for segment in result["segments"]
-             for t in (segment["start"], (segment["start"] + segment["end"])/2, segment["end"]))
-    radius, time = max((math.dist(crane.center, world(case.pose(t), lug)), -t) for t in times)
-    time = -time
-    pose = case.pose(time)
-    hook = world(pose, lug)
-    if radius > 1e-9:
-        ux, uy = (hook[0]-crane.center[0])/radius, (hook[1]-crane.center[1])/radius
-    else:
-        ux, uy = pose[2:]
+    crane, lug = case.cranes[side], case.lugs[side]
+    pose = case.pose(0)
+    px, py, cosine, sine = pose
 
-    def radial(point):
-        x, y = world(pose, point)
-        return (x-crane.center[0])*ux + (y-crane.center[1])*uy
+    def transverse(point):
+        return -(point[0]-px)*sine + (point[1]-py)*cosine
 
-    projected = [radial(point) for point in corners]
-    rear, front = min(projected), max(projected)
+    center = transverse(crane.center)
+    span = [transverse(point) for point in crane.box.corners]
+    radius = math.dist(crane.center, world(pose, lug))
     body_top = case.bottom + case.height
-    hook_height = body_top + crane.sling_height
-    horizontal = (radius - BOOM_HEAD_REACH) / crane.boom
-    reaches = -1 <= horizontal <= 1
-    angle = math.degrees(math.acos(min(1, max(-1, horizontal))))
-    model = ElevationModel(crane.boom, angle, radius, hook_height, front-rear, case.height)
-    usable_rope = reaches and model.block_top <= model.tip_height - .61
-    left = min(rear, -BODY_MODEL_FRONT)
-    right = max(front, radius + 1.1, MODEL_REAR)
-    top = max(hook_height + BLOCK_GAP + BLOCK_H, model.tip_height + 1 if reaches else 5.5)
-    fig,k = drawing(f"{tag} 机吊装立面图", 3+side, min(317/(right-left), 195/top), f"elevation-{tag.lower()}")
-    ground = 68
-    paper = _Paper(k, 225+k*(left+right)/2, ground)
-    draw_ground(fig, 39, 402, ground)
-    axles = drawing_axles({}, {"model": crane.model}, crane.brand)
-    draw_truck(fig, paper, axles, model.hinge if reaches else (0, model.hinge[1]), crane.model)
-    if reaches:
-        _draw_boom(fig, paper, model)
-        _draw_luffing_cylinder(fig, paper, model)
-    _draw_hook_block(fig, paper, model)
-    if usable_rope:
-        _draw_rope(fig, paper, model)
+    height = body_top + crane.sling_height
+    radial = max(-1.0,min(1.0,(lug[1]-center)/radius)) if radius > 1e-9 else 0
+    facing = 1 if center <= lug[1] else -1
+    reach = (radius - BOOM_HEAD_REACH) / crane.boom
+    model = (ElevationModel(crane.boom, math.degrees(math.acos(reach)), radius, height, case.width, case.height)
+             if abs(reach) <= 1 else None)
 
-    body = ((rear,case.bottom), (front,case.bottom), (front,body_top), (rear,body_top))
-    hx, hy = paper(radius, hook_height)
-    sx, sy = paper(radius, body_top)
-    cx, cy = paper((rear+front)/2, case.bottom+case.height/2)
-    fig.add(Polyline(tuple(paper(x,y) for x,y in body), True),
-            Line(sx,sy,hx,hy,"RIGGING"), Circle(sx,sy,1.15,"RIGGING"),
-            Text(cx,cy+1.5,"车体投影",height=3.3,align=ALIGN_CENTER))
-    dim.leader(fig, (sx,sy), (sx-7,sy+7), f"吊点 {tag}", align=ALIGN_RIGHT, height=3.2)
-    dim.v_dim(fig,ground,hy,paper(right,0)[0]-11,f"H={hook_height:.2f} m",ref_x=hx,side="left")
-    dim.h_dim(fig,hx,paper.ox,ground-10,f"R={radius:.2f} m",ref_y=ground)
-    upper = max(s["radii"][side][1] for s in result["segments"])
-    leg = min(len(case.route)-2, int(time*(len(case.route)-1)))
-    fig.add(Text(36,282,f"{tag} 机  ·  {crane.brand} {crane.model}   ·   {crane.config}",height=4.7),
-            Text(36,272,f"本机幅度采样峰值姿态  P{leg} → P{leg+1}   ·   路径 {100*time:.1f}%",height=3.6),
-            Text(36,49,f"固定臂长 {crane.boom:g} m   ·   索具高度 {crane.sling_height:.2f} m   ·   "
-                 f"全程幅度上界 {math.ceil(upper*100)/100:.2f} m",height=3.7),
-            Text(36,37,f"吊物分载 {case.mass*result['shares'][side]:.2f} t   ·   "
-                 f"本机总吊重 {result['loads'][side]:.2f} t",height=3.7),
-            Text(36,24,"沿本机回转中心至本侧吊点投影，底盘为侧视示意。臂架仰角由幅度和臂长推算。",height=3.2))
+    half_width = case.width/2
+    body_ends = (center - facing*BODY_MODEL_FRONT, center + facing*MODEL_REAR)
+    edge_left = min(-half_width, *span, *body_ends)
+    edge_right = max(half_width, *span, *body_ends)
+    top = max(height + 2, model.tip_height + .9 if model else HINGE_H + .8)
+    fig,k = drawing(f"{tag} 机起吊端视图", 3+side, min(310/(edge_right-edge_left), 178/top),
+                    f"elevation-{tag.lower()}")
+    ground = 80
+    paper = _Paper(k, 222+k*(edge_left+edge_right)/2, ground)
+    draw_ground(fig, 39, 401, ground)
+
+    cargo = ((-half_width,case.bottom), (half_width,case.bottom), (half_width,body_top), (-half_width,body_top))
+    fig.add(Polyline(tuple(paper(*point) for point in cargo), True))
+    cx, cy = paper(0, body_top)
+    # Place the caption outside a narrow end face at small drawing scales.
+    if case.width*k >= 12 and case.height*k >= 6:
+        _, middle = paper(0, case.bottom+case.height/2)
+        fig.add(Text(cx,middle+1.5,"吊物端面",height=2.9,align=ALIGN_CENTER))
+    else:
+        dim.leader(fig,(cx,cy-2),(cx+14,cy-2),"吊物端面",height=2.8,dot=False)
+    x1, bottom = paper(-half_width,case.bottom)
+    x2, _ = paper(half_width,case.bottom)
+    height_x = min(x1,x2)-7
+    dim.h_dim(fig,x1,x2,ground-8,"",ref_y=bottom)
+    dim.v_dim(fig,bottom,cy,height_x,"",ref_x=min(x1,x2),side="left")
+    fig.add(Text(cx,ground-4,f"短边 {case.width:.2f} m",height=2.9,align=ALIGN_CENTER,layer="DIM"),
+            Text(height_x-4,(bottom+cy)/2,f"吊物高度 {case.height:.2f} m",height=2.8,
+                 align=ALIGN_CENTER,angle=90,layer="DIM"))
+
+    layer = (LAYER_TRACE_A, LAYER_TRACE_B)[side]
+    sx, _ = paper(center, 0)
+    hx, hy = paper(lug[1], height)
+    lift_point = paper(lug[1], body_top)
+    pivot = paper(center, HINGE_H)
+    foot_x1, foot_x2 = paper(max(span),0)[0], paper(min(span),0)[0]
+    foot_row = ground-18
+    fig.add(Line(foot_x1,foot_row,foot_x2,foot_row,layer),
+            Line(foot_x1,foot_row-1.6,foot_x1,foot_row+1.6,layer),
+            Line(foot_x2,foot_row-1.6,foot_x2,foot_row+1.6,layer),
+            Line(sx,foot_row-1.6,sx,foot_row+1.6,layer),
+            Text(foot_x2+3,foot_row+1.5,f"{tag} 机占地包络投影",height=3.0,layer=layer))
+    truck = Figure("", 0, 0)
+    upper = Figure("", 0, 0)
+    local = _Paper(1, 0, 0)
+    axles = drawing_axles({}, {"model": crane.model}, crane.brand)
+    draw_truck(truck, local, axles, (0, HINGE_H), crane.model, upper_figure=upper)
+    draw_end_view_profile(fig,paper,truck,center,facing)
+    usable_rope = model is not None and model.block_top < model.tip_height - .61
+    if model:
+        _draw_boom(upper, local, model)
+        _draw_luffing_cylinder(upper, local, model, annotate=False)
+        if usable_rope:
+            _draw_hook_block(upper, local, model)
+            _draw_rope(upper, local, model, annotate=False)
+    draw_end_view_profile(fig,paper,upper,center,radial if model else facing)
+    fig.add(Circle(*pivot,1.2))
+    fig.add(Line(*lift_point,hx,hy,LAYER_RIGGING), Circle(*lift_point,.85,LAYER_RIGGING))
     if not usable_rope:
-        message = "示意臂长够不到本侧吊点" if not reaches else "示意臂端与所需吊钩高度之间空间不足"
-        fig.add(Text(36,14,f"{message}，起升绳省略。",height=3.2,layer="RIGGING"))
+        fig.add(Circle(hx,hy,1.2))
+    label_sign = -1 if sx >= hx else 1
+    align = ALIGN_RIGHT if label_sign < 0 else "left"
+    if usable_rope:
+        rope_x = model.radius + LIFT_SHEAVE_RADIUS
+        rope_y = (model.tip_height + model.block_sheave[1])/2
+        rx, ry = paper(center + radial*rope_x,rope_y)
+        dim.leader(fig,(rx,ry),(rx+label_sign*12,ry+8),"起升钢丝绳",align=align,height=2.9,dot=False)
+    dim.leader(fig,(hx,hy),(hx+label_sign*13,hy+6),f"{tag} 吊钩中心  H={height:.2f} m",align=align,height=3.0,dot=False)
+    _, ty = lift_point
+    dim.leader(fig,lift_point,(max(x1,x2)+7,ty+2),f"吊点 {tag}",height=2.8,dot=False)
+    sling_y = (ty+hy)/2
+    sling_align = "left" if label_sign < 0 else ALIGN_RIGHT
+    dim.leader(fig,(hx,sling_y),(hx-label_sign*8,max(sling_y+3,ty+9)),"吊索",align=sling_align,height=2.8,dot=False)
+
+    fig.add(Text(36,282,f"{tag} 机  ·  {crane.brand} {crane.model}   ·   {crane.config}",height=4.7),
+            Text(36,272,"吊物端视（短边 × 高）· P0 起吊 · 竖向布置示意",height=3.6),
+            Text(36,46,f"起吊工作幅度 R={radius:.2f} m   ·   固定起重臂长度 {crane.boom:g} m",height=3.5),
+            Text(36,37,f"{tag} 机分担的吊物质量 {case.mass*result['shares'][side]:.2f} t   ·   本机计算总起重量 "
+                 f"{result['loads'][side]:.2f} t",height=3.5),
+            Text(36,28,f"吊点 {tag}  局部 X={lug[0]:.2f} m，Y={lug[1]:.2f} m",height=3.3),
+            Text(36,19,"上车及起升钢丝绳按吊物端面投影，底盘采用侧视示意。",height=3.0))
+    if not usable_rope:
+        fig.add(Text(36,12,"示意臂端与钩位之间条件不足，起升钢丝绳省略。",height=2.8,layer="RIGGING"))
+    clear_annotation_lines(fig)
     return fig
 
 
 def sheets(case,result):
     corners = [(x*case.length/2,y*case.width/2) for x,y in ((-1,-1),(1,-1),(1,1),(-1,1))]
     return (statics(case,result,corners), trajectory(case,result,corners),
-            crane_elevation(case,result,corners,0), crane_elevation(case,result,corners,1))
+            crane_elevation(case,result,0), crane_elevation(case,result,1))

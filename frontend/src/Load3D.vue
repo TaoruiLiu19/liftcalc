@@ -83,7 +83,7 @@ const model = computed(() => {
   const hook = at(apex)
   const slings = lugs.map((lug) => ({ a: hook, b: at(lug), lug: at(lug) }))
   const axes = [
-    { a: origin, b: at({ x: axis, y: 0, z: 0 }), label: 'x（长度，远离吊车）', tag: 'x', dx: 6, dy: 4, anchor: 'start' },
+    { a: origin, b: at({ x: axis, y: 0, z: 0 }), label: 'x（长度，远离起重机）', tag: 'x', dx: 6, dy: 4, anchor: 'start' },
     { a: origin, b: at({ x: 0, y: axis, z: 0 }), label: `y（宽度 B=${B.toFixed(2)} m）`, tag: 'y', dx: -6, dy: -6, anchor: 'end' },
     { a: origin, b: at({ x: 0, y: 0, z: axisZ }), label: 'z（竖向）', tag: 'z', dx: 6, dy: 4, anchor: 'start' },
   ]

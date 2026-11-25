@@ -21,6 +21,11 @@ function stop(){
   clearInterval(timer)
   playing.value=false
 }
+function seek(at:number){
+  stop()
+  progress.value=Math.max(0,Math.min(1,at))
+}
+defineExpose({seek})
 function play(){
   if(playing.value){stop();return}
   if(progress.value>=1)progress.value=0
@@ -67,7 +72,7 @@ const rails=computed(()=>{
   }))
 })
 const footprints=computed(()=>props.site?props.cranes.map(c=>outline([...c.center,c.heading],c.footprint_length,c.footprint_width)):[])
-const disks=computed(()=>props.site?props.obstacles.map((o,i)=>({p:o,r:o[2],label:'障碍 '+(i+1)})):[])
+const disks=computed(()=>props.site?props.obstacles.map((o,i)=>({p:o,r:o[2],label:'障碍物 '+(i+1)})):[])
 const frame=computed(()=>{
   const pts=[[0,0],...bodies.value.flat(),...footprints.value.flat(),...rails.value.flat(),...disks.value.flatMap(d=>[[d.p[0]-d.r,d.p[1]-d.r],[+d.p[0]+d.r,+d.p[1]+d.r]])]
   const xs=pts.map(p=>p[0]),ys=pts.map(p=>p[1])
@@ -97,7 +102,11 @@ function locate(e:PointerEvent|MouseEvent){
 }
 </script>
 <template>
-<figure><figcaption><b>{{site?'场地平面':'吊物顶面'}}</b><span>{{site?'场地坐标':'局部坐标'}} · m</span></figcaption>
+<figure><figcaption><b>{{site?'场地平面图':'吊物顶面'}}</b><span>{{site?'场地坐标':'局部坐标'}} · m</span></figcaption>
+<div v-if="preview" class="playback"><button type="button" @click="play">{{playing?'暂停':'慢速预演'}}</button>
+<button v-if="criticalProgress!==undefined" type="button" @click="seek(criticalProgress)">定位最小净距下界区间</button>
+<label title="各轨迹段在进度轴上等分">轨迹进度 <input aria-label="轨迹进度（各段等分）" type="range" min="0" max="1" step=".001" v-model.number="progress" @input="stop"></label>
+<span>{{(progress*100).toFixed(2)}}% · 纵轴 {{position[2].toFixed(1)}}°</span></div>
 <svg viewBox="0 0 600 316" :class="{pick:!site}" :aria-label="site?'场地坐标图':'点选吊点与重心的局部坐标图'" @pointermove="!site && (hover=locate($event))" @pointerleave="hover=undefined" @click="e=>{const p=locate(e);if(!site && p)emit('place',p[0],p[1])}">
   <g class="grid"><path v-for="t in xt" :key="'x'+t.n" :d="'M'+t.px+' 18v280'"/><path v-for="t in yt" :key="'y'+t.n" :d="'M20 '+t.px+'h560'"/></g>
   <g v-if="site" class="rails"><polyline v-for="(rail,i) in rails" :key="i" :points="poly(rail)"/></g>
@@ -127,14 +136,10 @@ function locate(e:PointerEvent|MouseEvent){
           :y="Y(poses[i][1])+(i===0?18:-9)">P{{i}} {{i===0?'起吊':'落位'}}</text>
   </template>
 </svg>
-<div v-if="preview" class="playback"><button type="button" @click="play">{{playing?'暂停':'慢速预演'}}</button>
-<button v-if="criticalProgress!==undefined" type="button" @click="stop();progress=criticalProgress">定位净距限制区间</button>
-<label>路径进度 <input aria-label="路径进度" type="range" min="0" max="1" step=".001" v-model.number="progress" @input="stop"></label>
-<span>{{(progress*100).toFixed(0)}}% · {{position[2].toFixed(1)}}°</span></div>
-<template v-if="preview"><div class="path-key"><span class="travel">形心路径</span><span class="path-a">吊点 A 路径</span><span class="path-b">吊点 B 路径</span></div>
-<p>{{hooks.map((h,i)=>'AB'[i]+' 机　幅度 '+h.radius.toFixed(2)+' m　方位 '+h.azimuth.toFixed(1)+'°').join('　｜　')}}</p></template>
+<template v-if="preview"><div class="path-key"><span class="travel">吊物形心轨迹</span><span class="path-a">吊点 A 轨迹</span><span class="path-b">吊点 B 轨迹</span></div>
+<p>{{hooks.map((h,i)=>'AB'[i]+' 机　工作幅度 '+h.radius.toFixed(2)+' m　吊钩方位角 '+h.azimuth.toFixed(1)+'°').join('　｜　')}}。方位角从场地 +X 轴量取，逆时针为正。</p></template>
 <p v-if="site && provisional">虚线矩形为预排站位，规划后显示选定位置。</p>
-<p v-else>{{site?'P0 起吊，末点落位；矩形表示吊机占地，圆表示场地障碍。':hover?'X '+hover[0].toFixed(3)+' m　 Y '+hover[1].toFixed(3)+' m':'原点 O 在吊物形心，+X 沿车长，+Y 沿车宽。'}}</p></figure>
+<p v-else>{{site?'P0 起吊，末点落位；矩形表示起重机占地包络，圆表示障碍物禁入区。':hover?'X '+hover[0].toFixed(3)+' m　 Y '+hover[1].toFixed(3)+' m':'原点 O 在吊物形心，+X 沿吊物长度，+Y 沿吊物宽度。'}}</p></figure>
 </template>
 <style scoped>
 figure{--route:#006157;--path-a:#2650a6;--path-b:#a44a0e;margin:0;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--plot)}

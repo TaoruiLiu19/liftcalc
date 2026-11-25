@@ -50,9 +50,9 @@ def required_load(
     *, payload: float, hook_mass: float = 0.0, rigging: float = 0.0, dynamic_factor: float = 1.1
 ) -> float:
     if payload < 0 or hook_mass < 0 or rigging < 0:
-        raise InfeasibleSectionError("重量不得为负")
+        raise InfeasibleSectionError("吊物、吊钩组和吊索具的质量不得为负")
     if dynamic_factor <= 0:
-        raise InfeasibleSectionError("动载系数必须为正")
+        raise InfeasibleSectionError("索具动载系数必须为正")
     return payload + hook_mass + rigging * dynamic_factor
 
 
@@ -60,7 +60,7 @@ def find_capability(points: Sequence[Point], *, required: float, ratio_limit: fl
     if not points:
         raise OutOfTableError("性能表为空")
     if required <= 0:
-        raise InfeasibleSectionError("所需吊重必须为正")
+        raise InfeasibleSectionError("计算总起重量必须为正")
     if not 0 < ratio_limit <= 1:
         raise InfeasibleSectionError("负荷率上限需在 (0, 1] 内")
 
@@ -101,7 +101,7 @@ def assess_single(points: Sequence[Point], *, required: float, limit: float, hei
                   ) -> tuple[Verdict, list[dict], str, str]:
     """逐配置、逐臂长核对载荷和钩高。幅度夹在两档间时，按较大的表档核载。"""
     if required <= 0:
-        raise InfeasibleSectionError("所需吊重必须为正")
+        raise InfeasibleSectionError("计算总起重量必须为正")
     groups: dict[tuple[str, float], list[Point]] = {}
     for point in points:
         if config is None or point.config == config:
@@ -117,15 +117,15 @@ def assess_single(points: Sequence[Point], *, required: float, limit: float, hei
             series = [next(point for point in series if point.radius >= radius)]
         for point in series:
             if not hook_known:
-                reason = '缺吊钩自重'
+                reason = '缺吊钩组质量'
             elif hook_overload:
-                reason = '吊件与索具的计算重量超过所选主钩额载'
+                reason = '吊物与吊索具的计算质量超过所选主吊钩组额定起重量'
             elif required > point.rated_load * limit + TOL:
-                reason = '载荷超限'
+                reason = '负荷率超限'
             elif height is not None and (point.lift_height is None or (radius is not None and radius != point.radius)):
-                reason = '缺指定位置的高度数据'
+                reason = '缺对应工作幅度的起升高度数据'
             elif height is not None and point.lift_height < height - TOL:
-                reason = '钩高不足'
+                reason = '起升高度不足'
             else:
                 reason = '满足'
                 eligible.append(point)
@@ -137,18 +137,18 @@ def assess_single(points: Sequence[Point], *, required: float, limit: float, hei
             eligible = [max(eligible, key=lambda point: point.rated_load)]
         verdict = find_capability(eligible, required=required, ratio_limit=limit)
         if radius is None:
-            message = f'已验证格点中最远 {verdict.max_radius:g} m'
+            message = f'已校核满足的最大工作幅度为 {verdict.max_radius:g} m'
         else:
-            message = f'指定幅度 {radius:g} m，按 {verdict.max_radius:g} m 表档核载；立面按该表档绘制'
+            message = f'指定工作幅度 {radius:g} m，按表列工作幅度 {verdict.max_radius:g} m 校核负荷率并绘制立面'
         if unknown:
             message += '；部分候选缺数据，不能判定其可行性'
         status = '满足'
     else:
         reasons = '、'.join(sorted({row['reason'] for row in records}))
-        message = reasons or '指定配置或幅度无覆盖，不外推'
+        message = reasons or '起重性能表未覆盖所选工况或指定工作幅度'
         status = '资料不足' if unknown else '不满足'
         verdict = (find_capability(candidates, required=required, ratio_limit=limit)
-                   if reasons == '载荷超限' else Verdict(False, required, limit, len(records)))
+                   if reasons == '负荷率超限' else Verdict(False, required, limit, len(records)))
     return verdict, records, status, message
 
 

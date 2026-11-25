@@ -78,7 +78,7 @@ def axle_stations(count: int | None, model_name: str = "") -> tuple[float, ...]:
 
 
 def draw_truck(figure: Figure, paper, axles: int | None, hinge: tuple[float, float],
-               model_name: str = "") -> None:
+               model_name: str = "", *, upper_figure: Figure | None = None) -> None:
     """按参考图描点画车身；轮胎用真实圆，半径不随轴数变化。"""
 
     def point(horizontal: float, vertical: float) -> tuple[float, float]:
@@ -136,6 +136,9 @@ def draw_truck(figure: Figure, paper, axles: int | None, hinge: tuple[float, flo
                  (station + 22, 233), (station + 42, 248), (station + 49, 269)),
                 closed=False, fine=True)
 
+    # 上车可与主臂一道投影，下车仍保留独立的底盘侧视轮廓。
+    if upper_figure is not None:
+        figure = upper_figure
     # 回转支承、上车底架和配重分层；臂根耳板直接落在上车底架上。
     panel(252, 186, 446, 194, False)
     contour(((165, 182), (165, 150), (527, 150),

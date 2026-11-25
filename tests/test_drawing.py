@@ -9,6 +9,7 @@ from __future__ import annotations
 import ast
 import math
 import re
+from itertools import combinations
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,7 @@ import pytest
 from liftcalc.core.result import ComputationResult
 from liftcalc.data.importer import build_db
 from liftcalc.data.repo import Repo
+from liftcalc.drawing.annotation import _edges, stroke_text_interval
 from liftcalc.drawing.figures import elevation_figure, figures_for
 from liftcalc.drawing.primitives import (
     ALIGN_CENTER,
@@ -130,6 +132,12 @@ def test_elevation_has_dimension_chain(repo: Repo, model: str) -> None:
         # 尺寸线太短时只写数值（尺寸链惯例），两种形式都算存在
         value = label.split("=", 1)[1]
         assert label in joined or value in joined, f"{model} 立面图缺尺寸 {label}"
+    texts = [item for item in figure.primitives if isinstance(item, Text) and item.content]
+    assert not any(overlaps(a.bbox(),b.bbox()) for a,b in combinations(texts,2))
+    for item in figure.primitives:
+        if isinstance(item,(Line,Polyline)):
+            for a,b in _edges(item):
+                assert not any(stroke_text_interval(a,b,label,gap=.15) for label in texts), (model,item)
 
 
 def elevation_result(repo: Repo, model: str) -> ComputationResult:
@@ -204,7 +212,7 @@ def test_dual_mode_reports_second_crane(repo: Repo) -> None:
     figure = elevation_figure(run_case(_dual(), repo))
     assert figure is not None
     joined = " ".join(_texts(figure))
-    assert "辅吊最远" in joined and "双机抬吊" in joined
+    assert "辅吊最大工作幅度" in joined and "双机抬吊" in joined
 
 
 def test_goods_sit_at_requested_clearance(repo: Repo) -> None:
@@ -225,7 +233,10 @@ def test_lift_height_above_tip_is_clamped(repo: Repo) -> None:
     figure = elevation_figure(result)
     assert figure is not None
     assert figure.meta["hook_h"] < 30.0
-    assert "臂端极限" in " ".join(_texts(figure))
+    texts = _texts(figure)
+    assert "臂端极限" in " ".join(texts)
+    assert {"所需吊钩中心离地高度", "图示吊钩中心高度 H",
+            f"{result.aux['load']['hook_height_m']:.2f} m", f"{figure.meta['hook_h']:.2f} m"} <= set(texts)
 
 
 # ---------------------------------------------------------------------------

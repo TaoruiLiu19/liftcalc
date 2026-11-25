@@ -13,6 +13,7 @@ from __future__ import annotations
 import math
 
 from liftcalc.core.result import ComputationResult
+from liftcalc.drawing.annotation import clear_annotation_lines, nearby_labels, place_label
 from liftcalc.drawing.dim import dash_dot
 from liftcalc.drawing.primitives import (
     ALIGN_CENTER,
@@ -140,12 +141,13 @@ def load_figure(result: ComputationResult) -> Figure | None:
         height=PAGE_H,
         notes=["轴测示意 · 不按比例", "坐标原点在形心"],
     )
+    labels: list[Text] = []
 
     # ---- 坐标轴（点划线，伸到箱体外） ------------------------------------
     axis_xy = max(hx, hy) * 1.85 + 0.3
     axis_z = apex[2] + 0.9
     for vector, label, offset, align in (
-        ((axis_xy, 0.0, 0.0), "x（长度，远离吊车）", (2.4, -1.2), ALIGN_LEFT),
+        ((axis_xy, 0.0, 0.0), "x（长度，远离起重机）", (2.4, -1.2), ALIGN_LEFT),
         ((0.0, axis_xy, 0.0), f"y（宽度 B={width:.2f} m）", (0.0, 4.2), ALIGN_CENTER),
         ((0.0, 0.0, axis_z), "z（竖向）", (2.4, 1.0), ALIGN_LEFT),
     ):
@@ -153,8 +155,8 @@ def load_figure(result: ComputationResult) -> Figure | None:
         head = frame(*vector)
         dash_dot(figure, tail, head, layer=LAYER_DIM)
         _arrow(figure, tail, head)
-        figure.add(Text(x=head[0] + offset[0], y=head[1] + offset[1], content=label,
-                        height=2.8, align=align, layer=LAYER_DIM))
+        labels.append(Text(head[0]+offset[0],head[1]+offset[1],label,
+                           height=2.8,align=align,layer=LAYER_DIM))
 
     # ---- 长方体 ----------------------------------------------------------
     corners = {
@@ -187,8 +189,7 @@ def load_figure(result: ComputationResult) -> Figure | None:
                         layer=LAYER_RIGGING),
                    Circle(cx=target[0], cy=target[1], r=0.85, layer=LAYER_RIGGING))
     figure.add(Circle(cx=hook[0], cy=hook[1], r=2.2, layer=LAYER_RIGGING))
-    figure.add(Text(x=hook[0] - 3.2, y=hook[1] + 1.2, content="吊钩", height=2.8,
-                    align=ALIGN_RIGHT, layer=LAYER_NOTE))
+    labels.append(Text(hook[0]-3.2,hook[1]+1.2,"吊钩",height=2.8,align=ALIGN_RIGHT,layer=LAYER_NOTE))
 
     # ---- 重心 ------------------------------------------------------------
     cg_point = frame(cg_x, cg_y, cg_z)
@@ -202,8 +203,8 @@ def load_figure(result: ComputationResult) -> Figure | None:
                 a, b = frame(*end), frame(cg_x, cg_y, cg_z)
                 figure.add(Line(x1=a[0], y1=a[1], x2=b[0], y2=b[1], layer=LAYER_HIDDEN))
     _centroid(figure, cg_point[0], cg_point[1])
-    figure.add(Text(x=cg_point[0] - 3.2, y=cg_point[1] - 4.2, content="重心 G",
-                    height=2.8, align=ALIGN_RIGHT, layer=LAYER_TEXT))
+    labels.append(Text(cg_point[0]-3.2,cg_point[1]-4.2,"重心 G",height=2.8,
+                       align=ALIGN_RIGHT,layer=LAYER_TEXT))
 
     # ---- 尺寸文字 --------------------------------------------------------
     def mid(a: tuple[float, float, float], b: tuple[float, float, float],
@@ -212,11 +213,9 @@ def load_figure(result: ComputationResult) -> Figure | None:
         return (pa[0] + pb[0]) / 2.0 + dx, (pa[1] + pb[1]) / 2.0 + dy
 
     x_mid = mid((-hx, -hy, -hz), (hx, -hy, -hz), 0.0, -4.2)
-    figure.add(Text(x=x_mid[0], y=x_mid[1], content=f"L={length:.2f} m", height=3.0,
-                    align=ALIGN_CENTER, layer=LAYER_DIM))
+    labels.append(Text(*x_mid,f"L={length:.2f} m",height=3.0,align=ALIGN_CENTER,layer=LAYER_DIM))
     z_mid = mid((-hx, hy, -hz), (-hx, hy, hz), -4.0, 0.0)
-    figure.add(Text(x=z_mid[0], y=z_mid[1], content=f"H={height:.2f} m", height=3.0,
-                    align=ALIGN_RIGHT, layer=LAYER_DIM))
+    labels.append(Text(*z_mid,f"H={height:.2f} m",height=3.0,align=ALIGN_RIGHT,layer=LAYER_DIM))
 
     # ---- 标题与底部信息 --------------------------------------------------
     figure.add(Text(x=8.0, y=PAGE_H - 8.0, content="吊物与重心三维示意", height=4.6))
@@ -224,22 +223,25 @@ def load_figure(result: ComputationResult) -> Figure | None:
                     height=2.6, layer=LAYER_NOTE))
     figure.add(Text(x=8.0, y=12.0, content=f"吊物 {length:.2f} × {width:.2f} × {height:.2f} m",
                     height=3.4))
-    figure.add(Text(x=8.0, y=7.6, content=f"重量 {weight:.2f} t", height=3.4))
+    figure.add(Text(x=8.0, y=7.6, content=f"质量 {weight:.2f} t", height=3.4))
     figure.add(Text(x=8.0, y=3.2,
                     content=f"重心 G 相对形心（{cg_x:+.2f}, {cg_y:+.2f}, {cg_z:+.2f}）m；"
-                            "x 指向远离吊车",
+                            "x 指向远离起重机",
                     height=2.8, layer=LAYER_NOTE))
     if slings:
         forces = [float(item["force_t"])*9.80665 for item in slings]
         angles = [float(item["angle_deg"]) for item in slings]
         figure.add(Text(x=PAGE_W - 8.0, y=12.0,
-                        content=f"名义索力 {min(forces):.2f}–{max(forces):.2f} kN",
+                        content=f"名义吊索拉力 {min(forces):.2f}–{max(forces):.2f} kN",
                         height=3.2, align=ALIGN_RIGHT))
         figure.add(Text(x=PAGE_W - 8.0, y=7.6,
                         content=f"与竖直夹角 {min(angles):.1f}°–{max(angles):.1f}°",
                         height=3.2, align=ALIGN_RIGHT))
     figure.add(Text(x=PAGE_W - 8.0, y=3.2, content="轴测示意，不按比例", height=2.8,
                     align=ALIGN_RIGHT, layer=LAYER_NOTE))
+    for label in labels:
+        figure.add(place_label(figure,nearby_labels(label),bounds=(5,16,PAGE_W-5,PAGE_H-16)) or label)
+    clear_annotation_lines(figure)
 
     figure.meta = {
         "length": length,

@@ -10,7 +10,7 @@ const error = computed(() => {
   if (measurement.value.datum === 'estimate') return ''
   if (rise.value === null) return touched.value || props.attempted ? '请填写实测高度。' : ''
   if (rise.value <= 0) return measurement.value.datum === 'bottom'
-    ? '总高度须大于吊物高度。' : '捆扎后索具高度须大于零。'
+    ? '吊物底面至吊钩中心的竖向距离须大于吊物高度。' : '吊物顶面至吊钩中心的竖向距离须大于零。'
   return ''
 })
 function changeDatum(event:Event) {
@@ -28,16 +28,16 @@ function measure(event:Event) {
 <template>
 <fieldset class="rigging-height"><legend>{{label}}</legend>
   <label>测量基准<select :value="measurement.datum" @change="changeDatum">
-    <option value="top">吊物顶面至钩中心</option><option value="bottom">吊物底面至钩中心</option>
+    <option value="top">吊物顶面至吊钩中心</option><option value="bottom">吊物底面至吊钩中心</option>
     <option v-if="estimate" value="estimate">按吊点几何估算</option>
   </select></label>
-  <label v-if="measurement.datum!=='estimate'">{{measurement.datum==='bottom'?'捆扎后总高度':'捆扎后索具净高'}} / m
+  <label v-if="measurement.datum!=='estimate'">{{measurement.datum==='bottom'?'底面至吊钩中心的竖向距离':'顶面至吊钩中心的竖向距离'}} / m
     <input type="number" step="any" required :value="measurement.value" :aria-invalid="!!error"
       :min="measurement.datum==='bottom'?bodyHeight:0" @input="measure" @blur="touched=true">
   </label>
   <p v-if="error" class="height-error" role="alert">{{error}}</p>
-  <p v-else-if="rise!==null && rise>0" class="muted">索具净高 {{rise.toFixed(2)}} m · 吊物底至钩中心 {{(bodyHeight+rise).toFixed(2)}} m</p>
-  <p v-else class="muted">{{measurement.datum==='estimate'?'按最短索与水平面成 60° 估算。':'填写索具受力拉紧后的竖向距离。'}}</p>
+  <p v-else-if="rise!==null && rise>0" class="muted">顶面至吊钩中心 {{rise.toFixed(2)}} m · 底面至吊钩中心 {{(bodyHeight+rise).toFixed(2)}} m</p>
+  <p v-else class="muted">{{measurement.datum==='estimate'?'按最短吊索与水平面成 60° 估算。':'填写吊索张紧时的竖向距离。'}}</p>
 </fieldset>
 </template>
 <style scoped>
