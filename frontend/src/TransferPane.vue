@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, reactive, ref, watch } from 'vue'
-import { craneModelKey, groupCraneModels } from './craneModels'
+import { groupCraneModels } from './craneModels'
 import type { Model, TransferOutcome, TransferScene } from './types'
 
 import TransferPlot from './TransferPlot.vue'
@@ -11,7 +11,7 @@ const props = defineProps<{models: Model[]}>()
 const form = reactive({
   length: 12, width: 3, height: 3, mass: 16, cg: [0,0,0], lugs: [[-5,0],[5,0]],
   start: [-11,0,90], auto_route: true, auto_stations: true, end: [11,0,90], bottom: null as number|null, plan_clearance: 0, factor: 1.1, gauge: 1.435,
-  cranes: [-1,1].map(sign => ({index: -1, boom: 0, center: [0,sign*5.5], footprint_length: 10, footprint_width: 5, heading: 0, boom_buffer: 1,
+  cranes: [-1,1].map(sign => ({modelKey: '', config: '', center: [0,sign*5.5], footprint_length: 10, footprint_width: 5, heading: 0, boom_buffer: 1,
     hook: null as number|null, hook_rating: null as number|null, rigging: 0.3, sling_height: null as number|null,
     radius_limit: null as number|null})),
   obstacles: [] as number[][],
@@ -24,13 +24,12 @@ const stages = ['吊物、吊点与重心', 'A 机工况', 'B 机工况', '转�
 const step = ref(0), reached = ref(0)
 const crane = computed(() => form.cranes[step.value-1])
 const modelChoices = computed(() => groupCraneModels(props.models))
-const selectedConfig = computed(() => props.models[crane.value?.index])
-const selectedGroup = computed(() => {
-  const row = selectedConfig.value
-  const key = row && craneModelKey(row)
-  return modelChoices.value.find(group => group.key === key)
+const selectedGroup = computed(() => modelChoices.value.find(group => group.key === crane.value?.modelKey))
+const maxRating = computed(() => {
+  const configs = selectedGroup.value?.configs ?? []
+  return Math.max(0, ...configs.filter(({row}) => !crane.value.config || row.config === crane.value.config)
+    .flatMap(({row}) => row.boom_ratings.map(rating => rating.max_rated_t)))
 })
-const boomRating = computed(() => selectedConfig.value?.boom_ratings.find(row => row.boom_m === crane.value.boom))
 const editor = ref<HTMLFormElement>(), panel = ref<HTMLElement>()
 const attempted = ref(false)
 let revision = 0
@@ -58,27 +57,22 @@ function advance(target = step.value + 1) {
   goto(target)
 }
 watch(form, () => { revision++; reached.value = Math.min(reached.value, step.value); result.value = undefined; error.value = '' }, {flush:'sync'})
-function selectConfig(i:number, index:number) {
-  const c = form.cranes[i], model = props.models[index]
-  if (!model) return
-  const previous = props.models[c.index]
-  const sameModel = previous && craneModelKey(previous) === craneModelKey(model)
-  c.index = index
-  if (!sameModel || !model.booms.includes(c.boom)) {
-    c.boom = model.booms.includes(25.98) ? 25.98 : model.booms[0]
-  }
-  if (sameModel) return
+function selectModel(i:number, key:string) {
+  const group = modelChoices.value.find(group => group.key === key)
+  const c = form.cranes[i]
+  if (!group || c.modelKey === key) return
+  const model = group.configs[0].row
   const hook = model.main_hooks.find(h=>h.is_default)
+  c.modelKey = key
+  c.config = ''
   c.hook = hook?.mass_t ?? model.hook_main_t
   c.hook_rating = hook?.rated_t ?? null
 }
-function selectModel(i:number, key:string) {
-  const group = modelChoices.value.find(group => group.key === key)
-  if (group) selectConfig(i, group.configs[0].index)
-}
-watch(()=>props.models, models=>{
-  const idx = models.findIndex(m=>m.model==='QY70K-1' && m.booms.includes(25.98))
-  if (models.length) for(let i=0;i<2;i++) selectConfig(i,Math.max(idx,0))
+watch(modelChoices, groups=>{
+  const initial = groups.find(m=>m.brand==='徐工' && m.model==='QY70K-1') ?? groups[0]
+  if (initial) form.cranes.forEach((c,i) => {
+    if (!groups.some(group => group.key === c.modelKey)) selectModel(i,initial.key)
+  })
 },{immediate:true})
 const split = computed(() => {
   const [[ax, ay], [bx, by]] = form.lugs
@@ -140,10 +134,11 @@ async function calculate() {
   const id=revision
   busy.value=true; error.value=''
   try {
-    const cranes=form.cranes.map(({index,center,heading,sling_height,...c})=>{
-      const m=props.models[index]
+    const cranes=form.cranes.map(({modelKey,config,center,heading,sling_height,...c})=>{
+      const m=modelChoices.value.find(group => group.key === modelKey)
+      if (!m) throw new Error('请选择两台起重机的机型。')
       return {...c,...(typeof sling_height==='number'?{sling_height}:{}), ...(form.auto_stations?{}:{center,heading}),
-        radius_limit:c.radius_limit || null,model:m.model,brand:m.brand,config:m.config}
+        radius_limit:c.radius_limit || null,model:m.model,brand:m.brand,config:config || null}
     })
     const {bottom, ...inputs}=form
     const data=await window.pywebview!.api.calculate({kind:'rail.transfer',
@@ -200,17 +195,15 @@ const craneLabels=['起重臂水平投影包络半宽 / m','主吊钩组质量 /
               </select>
             </label>
             <label class="config-picker">起重性能表工况
-              <select :value="crane.index" :title="selectedConfig?.config" :disabled="!selectedGroup" @change="selectConfig(step-1,Number(($event.target as HTMLSelectElement).value))">
-                <option v-for="config in selectedGroup?.configs" :key="config.index" :value="config.index">{{config.row.config}}</option>
-              </select>
-            </label>
-            <label>起重臂长度（全程固定） / m
-              <select v-model.number="crane.boom" :disabled="!selectedConfig">
-                <option v-for="boom in selectedConfig?.booms" :key="boom" :value="boom">{{boom}}</option>
+              <select v-model="crane.config" :title="crane.config || '自动选择合适工况'" :disabled="!selectedGroup">
+                <option value="">自动选择合适工况</option>
+                <option v-for="config in selectedGroup?.configs" :key="config.index" :value="config.row.config">{{config.row.config}}</option>
               </select>
             </label>
           </div>
-          <p v-if="boomRating" class="muted rating">所选工况及臂长的表列最大额定总起重量 <strong>{{boomRating.max_rated_t}} t</strong>。各作业位置的额定总起重量按工作幅度查表。</p>
+          <p class="muted rating">起重臂长度由软件按全程工作幅度和负荷率选取，每台起重机全程采用一组工况和臂长。</p>
+          <p v-if="!crane.config" class="muted rating">自动工况从所选机型的已收录表档中筛选，采用前须核对配重、支腿状态及允许作业方位。</p>
+          <p v-if="maxRating" class="muted rating">当前选表范围内的最大表列额定总起重量 <strong>{{maxRating}} t</strong>。</p>
         </section>
         <div class="columns" :key="step">
           <div class="stack"><TransferPlot v-bind="scene" site :focus="step-1"/>
@@ -279,7 +272,7 @@ const craneLabels=['起重臂水平投影包络半宽 / m','主吊钩组质量 /
 h3{font-size:15px;margin:0 0 10px}.block{padding:15px;border-radius:12px;border:1px solid var(--line);background:var(--tile);min-width:0}
 .columns{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(280px,1fr);gap:14px;margin-top:14px;align-items:start}
 .stack{display:grid;gap:12px}.pair,.three,.four{display:grid;gap:6px 12px}.three{grid-template-columns:repeat(3,minmax(0,1fr))}.four{grid-template-columns:repeat(4,minmax(0,1fr))}
-.crane-picker{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.8fr) minmax(0,.9fr);column-gap:12px}
+.crane-picker{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.8fr);column-gap:12px}
 .config-picker select{text-overflow:ellipsis}
 .rating{margin:6px 0 0}.rating strong{color:var(--ink)}
 .point-tabs,.actions{display:flex;align-items:center;gap:8px}.point-tabs{margin-bottom:14px}
@@ -293,6 +286,5 @@ h3{font-size:15px;margin:0 0 10px}.block{padding:15px;border-radius:12px;border:
 .point-editor.invalid{border-color:var(--danger)}
 .obstacle{padding-bottom:12px}.muted{color:var(--quiet)}
 @media(max-width:920px){.columns{grid-template-columns:1fr}.four{grid-template-columns:1fr 1fr}}
-@media(max-width:1040px){.crane-picker{grid-template-columns:minmax(0,1.65fr) minmax(0,1fr)}.crane-picker>label:first-child{grid-column:1/-1}}
 @media(max-width:680px){.workflow{display:flex;flex-direction:column;gap:8px}.workflow-nav{width:100%}.workflow-nav h2{display:none}.steps{flex-direction:row;flex-wrap:wrap}.steps li{flex:auto}.crane-picker{grid-template-columns:1fr}}
 </style>

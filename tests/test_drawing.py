@@ -29,7 +29,7 @@ from liftcalc.drawing.primitives import (
     Text,
     item_bbox,
 )
-from liftcalc.drawing.sheet import Sheet, overlaps
+from liftcalc.drawing.sheet import Sheet, overlaps, perf_table, title_block
 from liftcalc.drawing.style import SCALE_LADDER
 
 PACK = Path(__file__).resolve().parents[1] / "src" / "liftcalc" / "data" / "pack"
@@ -98,6 +98,36 @@ def test_text_bbox_follows_alignment_and_rotation() -> None:
     assert rx1 == pytest.approx(10 + 3, abs=1e-9)
     assert (rx1 - rx0) == pytest.approx(3, abs=1e-9)
     assert (ry1 - ry0) > 3                            # 竖向展开
+
+
+def test_table_and_title_block_fit_long_text_in_cells() -> None:
+    figure = Figure("表格", 420, 297)
+    rows = [
+        ("所需吊钩中心离地高度", "123.45 m"),
+        ("索1 吊物左前侧吊点吊索", "31.4°　12345.67 kN"),
+        ("工况", "主臂全配重支腿全伸侧后方作业（长标识用于检验格内排版）"),
+    ]
+    left, bottom, right, top = perf_table(figure, 410, 280, rows, width=84)
+    header_bottom = top - 6.4
+    divider = next(p.x1 for p in figure.primitives if isinstance(p, Line) and p.y1 == bottom)
+    texts = [p for p in figure.primitives if isinstance(p, Text)]
+    assert [p.content for p in texts[1:]] == [value for row in rows for value in row]
+    assert divider - left > 26
+    for i, (label, value) in enumerate(zip(texts[1::2], texts[2::2])):
+        upper = header_bottom - 5.2*i
+        for item, a, b in ((label, left, divider), (value, divider, right)):
+            x0, y0, x1, y1 = item.bbox()
+            assert a < x0 < x1 < b
+            assert upper - 5.2 < y0 < y1 < upper
+
+    figure = Figure("标题栏", 420, 297)
+    long_text = "用于验证格内文字宽度的较长工程名称" * 4
+    left, bottom, _, _ = title_block(figure, Sheet(420, 297), title="起吊立面图", subtitle="A3",
+                                     scale_text="1:100", drawing_no="LC-01", project=long_text,
+                                     date=long_text)
+    project, date = [p for p in figure.primitives if isinstance(p, Text) and p.content == long_text]
+    assert project.bbox()[2] < left + 80
+    assert date.bbox()[2] < left + 38 and date.bbox()[1] > bottom
 
 
 def test_figure_bbox_skips_layers() -> None:

@@ -113,6 +113,8 @@ class DesktopApi:
             return {**result, "status": "planned", "poses": inputs.route,
                     "required_clearance": inputs.plan_clearance, "load_limit": DUAL_LIMIT,
                     "stations": [dict(center=c.center, heading=c.heading) for c in inputs.cranes],
+                    "configurations": [dict(brand=c.brand, model=c.model, config=c.config, boom=c.boom)
+                                       for c in inputs.cranes],
                     "drawings": previews}
         if case.get("kind") != "crane.capability" or case.get("mode", "single") != "single":
             raise ValueError("此工作台仅支持单机")

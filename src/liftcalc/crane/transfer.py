@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 import math
-from bisect import bisect_left
+from bisect import bisect_left, bisect_right
+from collections import defaultdict
+from dataclasses import dataclass
+from functools import lru_cache
 from itertools import chain
 from typing import Annotated
 
@@ -22,8 +25,8 @@ class Inputs(BaseModel):
 class Crane(Inputs):
     brand: str
     model: str
-    config: str
-    boom: Positive
+    config: str | None = None
+    boom: Positive | None = None
     center: XY
     boom_buffer: Positive
     footprint_length: Positive
@@ -104,13 +107,17 @@ class Transfer(Inputs):
         return [self.start, *self.waypoints, self.end]
 
     def pose(self, t):
-        route = self.route
-        offset = t * (len(route)-1)
-        leg = min(int(offset), len(route)-2)
-        u = offset - leg
-        x, y, deg = (a + u*(b-a) for a, b in zip(route[leg], route[leg+1]))
-        angle = math.radians(deg)
-        return x, y, math.cos(angle), math.sin(angle)
+        return route_pose(self.route, t)
+
+
+def route_pose(route, t):
+    offset = t * (len(route)-1)
+    leg = min(int(offset), len(route)-2)
+    u = offset - leg
+    ax, ay, a_deg = route[leg]
+    bx, by, b_deg = route[leg+1]
+    angle = math.radians(a_deg + u*(b_deg-a_deg))
+    return ax + u*(bx-ax), ay + u*(by-ay), math.cos(angle), math.sin(angle)
 
 
 def world(pose, point):
@@ -132,8 +139,13 @@ def point_segment(p, a, b):
     length2 = dx*dx + dy*dy
     if not length2:
         return math.dist(p, a)
-    t = max(0, min(1, ((p[0]-a[0])*dx+(p[1]-a[1])*dy)/length2))
-    return math.hypot(p[0]-a[0]-t*dx, p[1]-a[1]-t*dy)
+    px, py = p[0]-a[0], p[1]-a[1]
+    t = (px*dx+py*dy)/length2
+    if t <= 0:
+        return math.hypot(px, py)
+    if t > 1:
+        t = 1
+    return math.hypot(px-t*dx, py-t*dy)
 
 
 def segment_gap(a, b, c, d):
@@ -152,6 +164,7 @@ class Box:
         theta = math.radians(heading)
         self.pose = (*center, math.cos(theta), math.sin(theta))
         self.length, self.width = length, width
+        self.half_length, self.half_width = length/2, width/2
         self.corners = tuple(world(self.pose, (x*length/2,y*width/2))
                              for x,y in ((-1,-1),(1,-1),(1,1),(-1,1)))
 
@@ -161,7 +174,7 @@ class Box:
         bx,by,u,v = self.pose
         dx,dy = x-bx,y-by
         co,si = abs(c*u+s*v),abs(s*u-c*v)
-        a,b = self.length/2,self.width/2
+        a,b = self.half_length,self.half_width
         l,w = length/2,width/2
         return max(abs(dx*u+dy*v)-a-l*co-w*si,
                    abs(-dx*v+dy*u)-b-l*si-w*co,
@@ -175,7 +188,17 @@ class Box:
         pose = ((a[0]+b[0])/2,(a[1]+b[1])/2,c,s)
         if self.separation(pose,length,0) <= 0:
             return 0
-        return min(segment_gap(a,b,self.corners[i-1],p) for i,p in enumerate(self.corners))
+        # For disjoint shapes a nearest pair includes either a segment
+        # endpoint or a rectangle corner, including when two edges are parallel.
+        x,y,u,v = self.pose
+        ax,ay = a[0]-x, a[1]-y
+        bx,by = b[0]-x, b[1]-y
+        hl, hw = self.half_length, self.half_width
+        end_a = math.hypot(max(0.0, abs(ax*u+ay*v)-hl), max(0.0, abs(-ax*v+ay*u)-hw))
+        end_b = math.hypot(max(0.0, abs(bx*u+by*v)-hl), max(0.0, abs(-bx*v+by*u)-hw))
+        p0,p1,p2,p3 = self.corners
+        return min(end_a, end_b, point_segment(p0,a,b), point_segment(p1,a,b),
+                   point_segment(p2,a,b), point_segment(p3,a,b))
 
     def distance(self, other):
         if self.separation(other.pose,other.length,other.width)<=0:
@@ -183,12 +206,66 @@ class Box:
         return min(self.segment_distance(other.corners[i-1],p) for i,p in enumerate(other.corners))
 
 
+class StationGeometry:
+    """Fixed distances and bounded sample caches for one station pair."""
+
+    def __init__(self, case):
+        boxes = self.boxes = tuple(crane.box for crane in case.cranes)
+        disks = tuple(case.obstacles)
+        obstacles = tuple(f"障碍物 {i} 禁入区" for i in range(1, len(disks)+1))
+        self.cargo_labels = ("A 机占地包络", "B 机占地包络", *obstacles)
+        self.boom_labels = ((self.cargo_labels[1], *obstacles), (self.cargo_labels[0], *obstacles))
+        fixed = [(boxes[0].distance(boxes[1]), "A 机占地包络 / B 机占地包络")]
+        for box, label in zip(boxes, self.cargo_labels):
+            fixed.extend((clearance(box, box.pose, disk), f"{label} / {name}")
+                         for disk, name in zip(disks, obstacles))
+        self.fixed_gap = min(fixed)
+        stationary = ["两台起重机的占地包络相交"] if fixed[0][0] <= 0 else []
+        stationary.extend(f"{pair} 接触或相交" for distance, pair in fixed[1:] if distance <= 0)
+        if 0 < self.fixed_gap[0] < case.plan_clearance:
+            stationary.append(self.fixed_gap[1] + " 水平净距不足")
+        self.stationary = tuple(stationary)
+
+        size = min(8192, 50000 // (len(disks)+2))
+        center_a, center_b = (crane.center for crane in case.cranes)
+        pad_a, pad_b = (crane.boom_buffer for crane in case.cranes)
+
+        @lru_cache(maxsize=size)
+        def cargo_gaps(pose):
+            sides = (boxes[0].separation(pose, case.length, case.width),
+                     boxes[1].separation(pose, case.length, case.width))
+            if not disks:
+                return sides
+            return (*sides, *(clearance(case, pose, disk) for disk in disks))
+
+        @lru_cache(maxsize=size)
+        def boom_gaps(hooks):
+            a, b = hooks
+            side_a = (boxes[1].segment_distance(center_a, a) - pad_a,)
+            side_b = (boxes[0].segment_distance(center_b, b) - pad_b,)
+            if disks:
+                side_a += tuple(point_segment(disk[:2], center_a, a) - disk[2] - pad_a for disk in disks)
+                side_b += tuple(point_segment(disk[:2], center_b, b) - disk[2] - pad_b for disk in disks)
+            mutual = segment_gap(center_a, a, center_b, b) - pad_a - pad_b
+            return (side_a, side_b), mutual
+
+        self.cargo_gaps = cargo_gaps
+        self.boom_gaps = boom_gaps
+
+
 class RouteTooLong(ValueError):
     """The required subdivisions exceed the supported route length."""
 
 
-def route_intervals(case):
-    route = case.route
+class _RouteClearanceRejected(ValueError):
+    def __init__(self, bound, pair, leg, start, end, intervals_checked):
+        self.bound = max(0.0, bound)
+        self.pair = pair
+        self.leg, self.start, self.end = leg, start, end
+        self.intervals_checked = intervals_checked
+
+
+def route_intervals(case, route):
     leg_count = len(route)-1
     total = 0
     for leg, (a, b) in enumerate(zip(route, route[1:])):
@@ -213,42 +290,187 @@ def chart_rows(crane, repo, cache):
     return cache[key]
 
 
-def analyze(case, repo, *, chart_cache=None, diagnostics=False):
+@dataclass(frozen=True)
+class LoadChart:
+    config: str
+    boom: float
+    radii: tuple[float, ...]
+    ratings: tuple[float, ...]
+
+
+def automatic_charts(case, repo, cache):
+    """Read each model once and keep each configuration/boom pair together."""
+    models = {}
+    options = []
+    missing = []
+    for tag, crane in zip("AB", case.cranes):
+        if crane.config is not None and crane.boom is not None:
+            options.append(None)
+            continue
+        model = crane.brand, crane.model
+        if model not in models:
+            groups = defaultdict(list)
+            for row in repo.model_capacity(*model):
+                groups[row["config_name"], row["boom_len"]].append(row)
+            for key, rows in groups.items():
+                cache[(*model, *key)] = sorted(rows, key=lambda row: row["radius"])
+            models[model] = groups.keys()
+        charts = []
+        for config, boom in models[model]:
+            if ((crane.config is not None and crane.config != config)
+                    or (crane.boom is not None and crane.boom != boom)):
+                continue
+            rows = cache[(*model, config, boom)]
+            charts.append(LoadChart(config, boom, tuple(row["radius"] for row in rows),
+                                    tuple(row["rated_load"] for row in rows)))
+        if not charts:
+            name = f"{crane.brand} {crane.model}"
+            if crane.config:
+                name += f"（{crane.config}）"
+            if crane.boom is not None:
+                name += f" {crane.boom:g} m"
+            missing.append(f"{tag} 机 {name} 没有可供自动选择的起重性能表数据。")
+        options.append(charts)
+    if missing:
+        raise TransferSearchError(missing, "无法从起重性能表选出双机工况和臂长。")
+    return options
+
+
+def search_chart(crane, options, repo, cache):
+    if options is None:
+        return chart_rows(crane, repo, cache)
+    # A pointwise upper envelope guides the lattice only. The final check
+    # uses one real chart per crane for the entire route.
+    radii = sorted({r for chart in options for r in chart.radii})
+    return [
+        dict(radius=r, rated_load=max(chart.ratings[bisect_left(chart.radii, r)]
+                                      for chart in options if chart.radii[0] <= r <= chart.radii[-1]))
+        for r in radii
+    ]
+
+
+def choose_chart(options, gross, samples):
+    lower = min(bounds[0] for bounds, _ in samples)
+    upper = max(bounds[1] for bounds, _ in samples)
+    observed = sorted({r for _, witness in samples for r in witness})
+
+    def rank(chart):
+        radii, ratings = chart.radii, chart.ratings
+        first, stop = bisect_left(radii, lower), bisect_left(radii, upper) + 1
+        bucket = ratings[first:stop]
+        ratio = max((gross / rating for rating in bucket if rating > 0), default=math.inf)
+        covers = radii[0] <= lower and upper <= radii[-1] and all(r > 0 for r in bucket)
+        uncovered = max(0.0, radii[0] - lower) + max(0.0, upper - radii[-1])
+        if covers and ratio <= DUAL_LIMIT:
+            return 0, False, uncovered, ratio, chart.boom, chart.config
+        overload = False
+        for k, rating in enumerate(bucket, first):
+            if gross <= rating * DUAL_LIMIT:
+                continue
+            # A sampled radius selects this row only within its ceiling bin.
+            i = bisect_right(observed, radii[k-1]) if k else bisect_left(observed, radii[0])
+            if i < len(observed) and observed[i] <= radii[k]:
+                overload = True
+                break
+        # Keep full-coverage overload evidence when the available shorter
+        # charts would simply leave parts of the route without data.
+        return (1 if covers else 2), overload, uncovered, ratio, chart.boom, chart.config
+
+    return min(options, key=rank)
+
+
+def check_chart(crane, tag, gross, rows, radii, bucket_check, bounds, witness, segment, diagnostics):
+    lower, upper = bounds
+    ratio, missing, overload_in_bucket = bucket_check(bisect_left(radii, lower), bisect_left(radii, upper)+1)
+    segment["ratios"].append(ratio)
+    covered = bool(rows) and radii[0] <= lower and upper <= radii[-1]
+    observed_low, observed_high = min(witness), max(witness)
+    if (covered and not missing and not overload_in_bucket and ratio is not None and ratio <= DUAL_LIMIT
+            and lower <= observed_low <= observed_high <= upper):
+        return
+
+    unsafe, unknown = segment["unsafe"], segment["unknown"]
+    times = (segment["start"], (segment["start"]+segment["end"])/2, segment["end"])
+
+    def explain(reason, detail, progress=None):
+        if diagnostics:
+            segment.setdefault("evidence", {})[reason] = dict(text=detail, progress=progress)
+
+    if not rows or observed_low < radii[0] or observed_high > radii[-1]:
+        reason = f"{tag} 机工作幅度无性能表数据"
+        unknown.append(reason)
+        if diagnostics:
+            if not rows:
+                explain(reason, f"当前工况没有 {crane.boom:g} m 臂长的起重性能表数据。")
+            else:
+                time, r = next((t, r) for t, r in zip(times, witness) if not radii[0] <= r <= radii[-1])
+                explain(reason, f"工作幅度 {r:.2f} m，表列工作幅度范围 {radii[0]:g}–{radii[-1]:g} m。", time)
+    if rows and not covered:
+        unknown.append(f"{tag} 机工作幅度包络超出性能表范围")
+    if missing:
+        unknown.append(f"{tag} 机区间内缺有效额定起重量")
+    overload = f"{tag} 机起重性能表负荷率超限"
+    for time, r in zip(times, witness):
+        k = bisect_left(radii, r)
+        if rows and radii[0] <= r and k < len(rows) and gross > rows[k]["rated_load"]*DUAL_LIMIT:
+            unsafe.append(overload)
+            if diagnostics:
+                rated = rows[k]["rated_load"]
+                detail = (f"负荷率 {gross/rated:.1%}，上限 {DUAL_LIMIT:.0%}。" if rated > 0
+                          else "该工况缺有效额定起重量。")
+                explain(overload, f"工作幅度 {r:.2f} m，采用表列工作幅度 {radii[k]:g} m。计算总起重量 {gross:.2f} t，"
+                        f"表列额定总起重量 {rated:.2f} t。{detail}", time)
+            break
+    if ratio is not None and ratio > DUAL_LIMIT and overload not in unsafe:
+        reason = f"{tag} 机区间内负荷率可能超限"
+        unknown.append(reason)
+        if diagnostics:
+            explain(reason, f"区间涉及表列工况的最高负荷率 {ratio:.1%}，上限 {DUAL_LIMIT:.0%}。")
+
+
+def analyze(case, repo, *, chart_cache=None, diagnostics=False, geometry=None, minimum_gap=None):
     """Check loads, working radii and horizontal clearances along the transfer."""
+    cache = {} if chart_cache is None else chart_cache
+    return assess_route(case, repo, cache, automatic_charts(case, repo, cache),
+                        diagnostics=diagnostics, geometry=geometry, minimum_gap=minimum_gap)[1]
+
+
+def assess_route(case, repo, chart_cache, options, *, diagnostics=False, geometry=None,
+                 require_clearance=False, minimum_gap=None):
+    """Measure the route once, then select and check its full-route load charts."""
     shares = case.shares()
-    boxes = [c.box for c in case.cranes]
-    stationary = []
-    fixed_gap = (boxes[0].distance(boxes[1]), "A 机占地包络 / B 机占地包络")
-    if fixed_gap[0] <= 0:
-        stationary.append("两台起重机的占地包络相交")
-    for j,box in enumerate(boxes):
-        for k, disk in enumerate(case.obstacles):
-            distance = clearance(box,box.pose,disk)
-            pair = f"{'AB'[j]} 机占地包络 / 障碍物 {k+1} 禁入区"
-            fixed_gap = min(fixed_gap, (distance, pair))
-            if distance <= 0:
-                stationary.append(f"{pair} 接触或相交")
-    if 0 < fixed_gap[0] < case.plan_clearance:
-        stationary.append(fixed_gap[1]+" 水平净距不足")
-    if chart_cache is None:
-        chart_cache = {}
-    charts = []
-    loads = []
-    for crane, share in zip(case.cranes, shares):
-        charts.append(chart_rows(crane, repo, chart_cache))
-        loads.append((case.mass*share + crane.rigging)*case.factor + crane.hook)
+    if geometry is None:
+        geometry = StationGeometry(case)
+    fixed_gap, stationary = geometry.fixed_gap, geometry.stationary
+    loads = [(case.mass*share + crane.rigging)*case.factor + crane.hook
+             for crane, share in zip(case.cranes, shares)]
+
+    route = case.route
+    lug_radii = tuple(math.hypot(*lug) for lug in case.lugs)
+    lug_radius_sum = sum(lug_radii)
+    lug_a, lug_b = case.lugs
+    crane_a, crane_b = case.cranes
+
+    @lru_cache(maxsize=2048)
+    def sample(t):
+        pose = route_pose(route, t)
+        a, b = world(pose, lug_a), world(pose, lug_b)
+        return geometry.cargo_gaps(pose), (a, b), (math.dist(a, crane_a.center), math.dist(b, crane_b.center))
 
     segments = []
+    route_samples = []
     critical = None
-    pending = [(interval, 0) for interval in route_intervals(case)]
+    pending = [(interval, 0) for interval in route_intervals(case, route)]
     interval_count = len(pending)
     pending.reverse()
     while pending:
         (leg, start, end, travel, turn, sweep), depth = pending.pop()
         mid = (start+end)/2
-        pose = case.pose(mid)
         times = (start, mid, end)
-        unsafe, unknown = stationary.copy(), []
+        cargo_start, _, radii_start = sample(start)
+        cargo_mid, hooks, radii_mid = sample(mid)
+        cargo_end, _, radii_end = sample(end)
+        unsafe, unknown = list(stationary), []
         evidence = {}
 
         def explain(reason, text, progress=None):
@@ -258,32 +480,23 @@ def analyze(case, repo, *, chart_cache=None, diagnostics=False):
         if diagnostics:
             for reason in stationary:
                 explain(reason, "两台起重机的站位在转运过程中固定。", 0.0)
-        ratios = []
         radius_bounds = []
-        hooks = [world(pose, lug) for lug in case.lugs]
-        for j, (crane, lug, rows, gross) in enumerate(zip(case.cranes, case.lugs, charts, loads)):
+        samples = []
+        movements = []
+        for j, (crane, lug_radius, gross) in enumerate(zip(case.cranes, lug_radii, loads)):
             tag = "AB"[j]
-            radius = math.dist(world(pose, lug), crane.center)
-            delta = (travel + turn*math.hypot(*lug))/2
-            radii = [r["radius"] for r in rows]
+            delta = (travel + turn*lug_radius)/2
+            movements.append(delta)
             if gross-crane.hook > crane.hook_rating:
                 reason = f"{tag} 机主吊钩组承载超限"
                 unsafe.append(reason)
                 explain(reason, f"吊物分担质量及吊索具经系数放大后为 {gross-crane.hook:.2f} t，主吊钩组额定起重量 {crane.hook_rating:.2f} t。", 0.0)
-            witness = [math.dist(world(case.pose(t), lug), crane.center) for t in times]
-            if not rows or min(witness) < radii[0] or max(witness) > radii[-1]:
-                reason = f"{tag} 机工作幅度无性能表数据"
-                unknown.append(reason)
-                if diagnostics:
-                    if not rows:
-                        explain(reason, f"当前工况没有 {crane.boom:g} m 臂长的起重性能表数据。")
-                    else:
-                        time, r = next((t, r) for t, r in zip(times, witness) if not radii[0] <= r <= radii[-1])
-                        explain(reason, f"工作幅度 {r:.2f} m，表列工作幅度范围 {radii[0]:g}–{radii[-1]:g} m。", time)
+            witness = (radii_start[j], radii_mid[j], radii_end[j])
+            radius = witness[1]
             lower, upper = radius-delta, radius+delta
             # Translation is linear. Only the rotating lug departs from its
             # endpoint chord, by at most max|p''(t)|/8 on this interval.
-            upper = min(upper, max(witness[0], witness[-1])+math.hypot(*lug)*turn**2/8)
+            upper = min(upper, max(witness[0], witness[-1])+lug_radius*turn**2/8)
             if crane.radius_limit is not None:
                 if max(witness) > crane.radius_limit + 1e-9:
                     reason = f"{tag} 机超过指定工作幅度上限"
@@ -294,38 +507,11 @@ def analyze(case, repo, *, chart_cache=None, diagnostics=False):
                     reason = f"{tag} 机工作幅度上限待核"
                     unknown.append(reason)
                     explain(reason, f"区间工作幅度上界 {upper:.2f} m，指定上限 {crane.radius_limit:.2f} m。")
-            if rows and (lower < radii[0] or upper > radii[-1]):
-                unknown.append(f"{tag} 机工作幅度包络超出性能表范围")
             radius_bounds.append((max(0, lower), upper))
-            bucket = rows[bisect_left(radii, lower):bisect_left(radii, upper)+1]
-            if any(r["rated_load"] <= 0 for r in bucket):
-                unknown.append(f"{tag} 机区间内缺有效额定起重量")
-            ratio = max((gross/r["rated_load"] for r in bucket if r["rated_load"] > 0), default=None)
-            ratios.append(ratio)
-            overload = f"{tag} 机起重性能表负荷率超限"
-            for time, r in zip(times, witness):
-                k = bisect_left(radii, r)
-                if rows and radii[0] <= r and k < len(rows) and gross > rows[k]["rated_load"]*DUAL_LIMIT:
-                    unsafe.append(overload)
-                    rated = rows[k]["rated_load"]
-                    if diagnostics:
-                        detail = (f"负荷率 {gross/rated:.1%}，上限 {DUAL_LIMIT:.0%}。" if rated > 0
-                                  else "该工况缺有效额定起重量。")
-                        explain(overload, f"工作幅度 {r:.2f} m，采用表列工作幅度 {radii[k]:g} m。计算总起重量 {gross:.2f} t，"
-                                f"表列额定总起重量 {rated:.2f} t。{detail}", time)
-                    break
-            if ratio is not None and ratio > DUAL_LIMIT and overload not in unsafe:
-                reason = f"{tag} 机区间内负荷率可能超限"
-                unknown.append(reason)
-                if diagnostics:
-                    explain(reason, f"区间涉及表列工况的最高负荷率 {ratio:.1%}，上限 {DUAL_LIMIT:.0%}。")
-        witnesses = (case.pose(start), pose, case.pose(end))
-        gaps = [(f"{'AB'[j]} 机占地包络", [box.separation(p,case.length,case.width) for p in witnesses])
-                for j,box in enumerate(boxes)]
-        gaps += [(f"障碍物 {j+1} 禁入区", [clearance(case,p,disk) for p in witnesses])
-                 for j,disk in enumerate(case.obstacles)]
+            samples.append(((lower, upper), witness))
         lower_gap = fixed_gap
-        for label, distances in gaps:
+        for i, label in enumerate(geometry.cargo_labels):
+            distances = (cargo_start[i], cargo_mid[i], cargo_end[i])
             lower_gap = min(lower_gap, (distances[1]-sweep/2, "吊物 / "+label))
             closest = min(distances)
             if closest <= 0:
@@ -339,14 +525,9 @@ def analyze(case, repo, *, chart_cache=None, diagnostics=False):
                         times[distances.index(closest)])
             elif distances[1] <= sweep/2:
                 unknown.append(f"吊物 / {label} 区间水平净距待核")
-        for j, crane in enumerate(case.cranes):
-            movement = (travel + turn*math.hypot(*case.lugs[j]))/2
-            start_xy,end_xy = crane.center,hooks[j]
-            gaps = [(f"{'AB'[1-j]} 机占地包络",boxes[1-j].segment_distance(start_xy,end_xy))]
-            gaps += [(f"障碍物 {k+1} 禁入区", point_segment(disk[:2],start_xy,end_xy)-disk[2])
-                     for k,disk in enumerate(case.obstacles)]
-            for label, dist in gaps:
-                gap = dist-crane.boom_buffer
+        boom_sides, mutual_gap = geometry.boom_gaps(hooks)
+        for j, movement in enumerate(movements):
+            for label, gap in zip(geometry.boom_labels[j], boom_sides[j]):
                 lower_gap = min(lower_gap, (gap-movement, "AB"[j]+" 起重臂水平投影 / "+label))
                 if 0 < gap < case.plan_clearance:
                     reason = f"{'AB'[j]} 机起重臂水平投影 / {label} 水平净距不足"
@@ -359,9 +540,7 @@ def analyze(case, repo, *, chart_cache=None, diagnostics=False):
                         explain(reason, "该轨迹位置的水平净距为零或负值。", mid)
                     else:
                         unknown.append(f"{'AB'[j]} 机起重臂水平投影 / {label} 区间水平净距待核")
-        c1,c2 = case.cranes
-        gap = segment_gap(c1.center,hooks[0],c2.center,hooks[1])-c1.boom_buffer-c2.boom_buffer
-        boom_bound = gap - (2*travel+turn*sum(math.hypot(*p) for p in case.lugs))/2
+        boom_bound = mutual_gap - (2*travel+turn*lug_radius_sum)/2
         lower_gap = min(lower_gap, (boom_bound, "A 机起重臂水平投影 / B 机起重臂水平投影"))
         if boom_bound <= 0:
             unknown.append("两台起重机的起重臂水平投影可能重叠，须校核三维净距")
@@ -379,6 +558,8 @@ def analyze(case, repo, *, chart_cache=None, diagnostics=False):
             for left,right in ((mid,end),(start,mid)):
                 pending.append(((leg,left,right,travel/2,turn/2,sweep/2), depth+1))
             continue
+        if (require_clearance and unresolved) or (minimum_gap is not None and max(0.0, bound) < minimum_gap):
+            raise _RouteClearanceRejected(bound, pair, leg+1, start, end, len(segments)+1)
         if 0 < case.plan_clearance and bound < case.plan_clearance and not any(
                 pair in msg and "净距不足" in msg for msg in unsafe):
             reason = pair+" 未证实达到要求的水平净距"
@@ -386,14 +567,38 @@ def analyze(case, repo, *, chart_cache=None, diagnostics=False):
             explain(reason, f"此段净距下界 {max(0, bound):.3f} m，要求 {case.plan_clearance:.3f} m。")
         if critical is None or bound < critical["lower_m"]:
             critical = dict(lower_m=bound, pair=pair, leg=leg+1, start=start, end=end)
-        segment = dict(leg=leg+1, start=start, end=end, ratios=ratios, radii=radius_bounds,
+        segment = dict(leg=leg+1, start=start, end=end, ratios=[], radii=radius_bounds,
                        unsafe=unsafe, unknown=list(dict.fromkeys(unknown)))
         if diagnostics and evidence:
             segment["evidence"] = evidence
         segments.append(segment)
+        route_samples.append(samples)
     # Zero means no positive clearance was established, not measured penetration.
     critical["lower_m"] = max(0.0, critical["lower_m"])
-    return dict(shares=shares, loads=loads, segments=segments, clearance=critical)
+    cranes = list(case.cranes)
+    for i, charts in enumerate(options):
+        if charts is None:
+            continue
+        chart = choose_chart(charts, loads[i], [samples[i] for samples in route_samples])
+        cranes[i] = cranes[i].model_copy(update=dict(config=chart.config, boom=chart.boom))
+    for j, (tag, crane, gross) in enumerate(zip("AB", cranes, loads)):
+        rows = chart_rows(crane, repo, chart_cache)
+        radii = tuple(row["radius"] for row in rows)
+        ratings = tuple(row["rated_load"] for row in rows)
+
+        @lru_cache(maxsize=512)
+        def bucket_check(first, stop, ratings=ratings, gross=gross):
+            bucket = ratings[first:stop]
+            positive = tuple(rating for rating in bucket if rating > 0)
+            weakest = min(positive, default=None)
+            return (gross/weakest if weakest is not None else None, len(positive) != len(bucket),
+                    weakest is not None and gross > weakest*DUAL_LIMIT)
+
+        for segment, samples in zip(segments, route_samples):
+            bounds, witness = samples[j]
+            check_chart(crane, tag, gross, rows, radii, bucket_check, bounds, witness, segment, diagnostics)
+    return (case.model_copy(update={"cranes": tuple(cranes)}),
+            dict(shares=shares, loads=loads, segments=segments, clearance=critical))
 
 
 def station_shift(crane, obstacles, heading, clearance_m, low, high):
@@ -479,7 +684,7 @@ def interpolate_hook(crane, lug, start, end, t):
             crane.center[1]+radius*math.sin(azimuth)-oy, yaw)
 
 
-def candidate_routes(case):
+def candidate_routes(case, *, boxes=None):
     yield []
     a,b = case.cranes
     dx,dy = b.center[0]-a.center[0], b.center[1]-a.center[1]
@@ -493,7 +698,8 @@ def candidate_routes(case):
     mid = tuple((x+y)/2 for x,y in zip(a.center,b.center))
     angle = math.degrees(math.atan2(uy,ux))
     angle += 180*round((case.start[2]-angle)/180)
-    boxes = [cr.box for cr in case.cranes]
+    if boxes is None:
+        boxes = [cr.box for cr in case.cranes]
     # Width of the passage along the line of centres, accounting for headings.
     def normal_projection(p):
         return (p[0]-mid[0])*nx + (p[1]-mid[1])*ny
@@ -585,49 +791,84 @@ def hook_motion_cost(case):
     return total
 
 
-def candidate_rank(segments, min_gap, motion):
+def candidate_rank(segments, min_gap, motion, *, prefer_chart_coverage=False):
     """Classify the evidence first; optimize only within each class."""
     unsafe = {msg for seg in segments for msg in seg["unsafe"]}
     unknown = {msg for seg in segments for msg in seg["unknown"]}
     severity = 2 if unsafe else (1 if unknown else 0)
+    if prefer_chart_coverage and any("性能表" in msg or "缺有效额定起重量" in msg for msg in unknown):
+        severity = 3
     peak = max((r for seg in segments for r in seg["ratios"] if r is not None), default=math.inf)
     peaks = sorted((max(s["radii"][i][1] for s in segments) for i in (0, 1)), reverse=True)
     return severity, len(unsafe), len(unknown), *peaks, peak, -min_gap, motion
 
 
 class TransferSearchError(ValueError):
-    def __init__(self, reasons):
-        super().__init__("在本次有限搜索范围内未找到满足连续避碰、指定工作幅度上限及水平净距的路径。")
+    def __init__(self, reasons, summary="在本次有限搜索范围内未找到满足连续避碰、指定工作幅度上限及水平净距的路径。"):
+        super().__init__(summary)
         self.reasons = tuple(reasons)
 
 
-def cargo_obstruction(case, boxes, pose):
-    for tag, box in zip("AB", boxes):
-        if box.separation(pose, case.length, case.width) <= 0:
-            return f"{tag} 机占地包络"
-    for index, obstacle in enumerate(case.obstacles, 1):
-        if clearance(case, pose, obstacle) <= 0:
-            return f"障碍物 {index} 禁入区"
+def endpoint_obstruction(case, geometry, poses, hook_pairs):
+    """Check endpoint clearance upper bounds shared by every path at these stations."""
+    for name, pose, hooks in zip(("起吊", "落位"), poses, hook_pairs):
+        for label, gap in zip(geometry.cargo_labels, geometry.cargo_gaps(pose)):
+            if gap <= 0:
+                return f"{name}姿态的吊物与{label}接触或相交。"
+        sides, mutual = geometry.boom_gaps(hooks)
+        gaps = [(mutual, "A 机起重臂水平投影 / B 机起重臂水平投影")]
+        for tag, labels, distances in zip("AB", geometry.boom_labels, sides):
+            gaps.extend((gap, f"{tag} 机起重臂水平投影 / {label}") for label, gap in zip(labels, distances))
+        gap, pair = min(gaps)
+        if gap <= 0:
+            return f"{name}时 {pair} 接触或相交。"
+        if gap < case.plan_clearance - 1e-9:
+            return f"{name}时 {pair} 的水平净距 {gap:.3f} m，小于要求 {case.plan_clearance:.3f} m。"
     return None
+
+
+def dominated_overload(route, case, loads, chart_columns, incumbent):
+    """Bound the rank from waypoints shared by all subdivisions of this route."""
+    mandatory_overloads = [False, False]
+    peak = 0.0
+    legs = len(route)-1
+    for step in range(legs+1):
+        pose = route_pose(route, step/legs)
+        for i, (lug, crane) in enumerate(zip(case.lugs, case.cranes)):
+            radii, capacities = chart_columns[i]
+            radius = math.dist(world(pose, lug), crane.center)
+            if not radii or radius < radii[0]-1e-9 or radius > radii[-1]+1e-9:
+                # Every real chart would lack coverage and rank below the incumbent.
+                return True
+            peak = max(peak, radius)
+            k = bisect_left(radii, radius)
+            if k < len(radii) and radius >= radii[0] and loads[i] > capacities[k]+1e-9:
+                # The search table is an upper envelope over real tables.
+                mandatory_overloads[i] = True
+    count = sum(mandatory_overloads)
+    return count > incumbent[1] or (count == incumbent[1] and peak > incumbent[3]+1e-9)
 
 
 def plan_transfer(case, repo, *, diagnostics=False):
     """Bounded corridor search, with continuous interval checks on each finalist."""
+    chart_cache = {}
+    options = automatic_charts(case, repo, chart_cache)
+    automatic = any(charts is not None for charts in options)
     if not (case.auto_route or case.auto_stations):
-        return case, analyze(case,repo,diagnostics=diagnostics)
+        return assess_route(case, repo, chart_cache, options, diagnostics=diagnostics)
     from liftcalc.crane.transfer_search import improve_clearance, lattice_routes
 
     loads = [(case.mass*share+c.rigging)*case.factor+c.hook
              for c,share in zip(case.cranes, case.shares())]
     heading = math.atan2(case.end[1]-case.start[1], case.end[0]-case.start[0])
     best = None
-    chart_cache = {}
     rejected = {}
-    endpoints = [(world(case.pose(0),lug),world(case.pose(1),lug)) for lug in case.lugs]
+    endpoint_poses = case.pose(0), case.pose(1)
+    endpoint_hooks = [tuple(world(pose, lug) for lug in case.lugs) for pose in endpoint_poses]
     endpoint_reasons = []
-    for time, name in ((0, "起吊"), (1, "落位")):
+    for pose, name in zip(endpoint_poses, ("起吊", "落位")):
         for index, disk in enumerate(case.obstacles, 1):
-            gap = clearance(case, case.pose(time), disk)
+            gap = clearance(case, pose, disk)
             if gap <= 0:
                 endpoint_reasons.append(f"{name}姿态的吊物与障碍物 {index} 禁入区接触或相交。")
             elif gap < case.plan_clearance:
@@ -635,23 +876,24 @@ def plan_transfer(case, repo, *, diagnostics=False):
                                         f"小于要求 {case.plan_clearance:.3f} m。")
     if endpoint_reasons:
         raise TransferSearchError(endpoint_reasons)
+    charts = [search_chart(crane, choices, repo, chart_cache) for crane, choices in zip(case.cranes, options)]
+    chart_columns = [(tuple(row["radius"] for row in rows),
+                      tuple(row["rated_load"] * DUAL_LIMIT for row in rows)) for rows in charts]
     for pair in candidate_stations(case,heading):
         layout = case.model_copy(update={"cranes":pair})
-        boxes = [cr.box for cr in pair]
-        fixed_gap, fixed_pair = min([(boxes[0].distance(boxes[1]), "A 机占地包络 / B 机占地包络")] + [
-            (clearance(box,box.pose,o), f"{tag} 机占地包络 / 障碍物 {index} 禁入区")
-            for tag,box in zip("AB",boxes) for index,o in enumerate(case.obstacles,1)
-        ])
+        geometry = StationGeometry(layout)
+        fixed_gap, fixed_pair = geometry.fixed_gap
         if fixed_gap <= 0 or fixed_gap < case.plan_clearance:
             reason = (f"{fixed_pair} 接触或相交。" if fixed_gap <= 0 else
                       f"{fixed_pair} 净距 {fixed_gap:.3f} m，小于要求 {case.plan_clearance:.3f} m。")
             rejected.setdefault("station", reason)
             continue
         # Every possible route at these stations has the same end poses.
-        lower_bounds = [max(math.dist(cr.center,p) for p in ends)
-                        for cr,ends in zip(pair,endpoints)]
-        endpoint_limit = next(((tag, r, cr.radius_limit, "起吊" if math.dist(cr.center, ends[0]) >= r else "落位")
-                               for tag,cr,r,ends in zip("AB",pair,lower_bounds,endpoints)
+        endpoint_radii = [tuple(math.dist(cr.center, hook) for cr, hook in zip(pair, hooks))
+                          for hooks in endpoint_hooks]
+        lower_bounds = [max(radii) for radii in zip(*endpoint_radii)]
+        endpoint_limit = next(((tag, r, cr.radius_limit, "起吊" if first >= r else "落位")
+                               for tag,cr,r,first in zip("AB",pair,lower_bounds,endpoint_radii[0])
                                if cr.radius_limit is not None and r > cr.radius_limit + 1e-9), None)
         if endpoint_limit:
             tag, radius, limit, phase = endpoint_limit
@@ -659,29 +901,51 @@ def plan_transfer(case, repo, *, diagnostics=False):
             continue
         if best is not None and best[0][0] == 0 and max(lower_bounds) > best[0][3] + 1e-9:
             continue
-        charts = [chart_rows(crane, repo, chart_cache) for crane in pair]
+        endpoint_failure = endpoint_obstruction(layout, geometry, endpoint_poses, endpoint_hooks)
+        if endpoint_failure:
+            rejected.setdefault("endpoint-clearance", endpoint_failure)
+            continue
         free_routes = (route for refinement in (1, 1.5, 2)
                        for route in lattice_routes(layout, charts, loads, DUAL_LIMIT,
-                                                   refinement=refinement))
-        for waypoints in chain(candidate_routes(layout), free_routes):
+                                                   refinement=refinement, boxes=geometry.boxes,
+                                                   peak_cap=(best[0][3] + 1e-9
+                                                             if best is not None and best[0][0] == 0 else math.inf)))
+        for waypoints in chain(candidate_routes(layout, boxes=geometry.boxes), free_routes):
             path = layout.model_copy(update={"waypoints":waypoints})
-            # Cheap collision rejection before evaluating the entire load chart.
+            route = path.route
+            incumbent = best[0][3] if best is not None and best[0][0] == 0 else None
+            # Shared point samples reject collisions and prove when a verified
+            # incumbent already has a smaller peak radius.
             samples = max(8,8*(len(waypoints)+1))
-            obstruction = next(((t/samples, label) for t in range(samples+1)
-                                if (label := cargo_obstruction(path,boxes,path.pose(t/samples)))), None)
-            if obstruction:
-                progress, label = obstruction
-                rejected.setdefault("collision", f"候选路径 {progress:.1%} 处，吊物与{label}接触或相交。")
+            rejected_early = True
+            for step in range(samples+1):
+                progress = step/samples
+                pose = route_pose(route, progress)
+                label = next((label for label, gap in zip(geometry.cargo_labels, geometry.cargo_gaps(pose))
+                              if gap <= 0), None)
+                if label:
+                    rejected.setdefault("collision", f"候选路径 {progress:.1%} 处，吊物与{label}接触或相交。")
+                    break
+                if incumbent is not None and any(math.dist(world(pose, lug), crane.center) > incumbent + 1e-9
+                                                 for lug, crane in zip(case.lugs, pair)):
+                    break
+            else:
+                rejected_early = False
+            if rejected_early:
                 continue
-            result = analyze(path,repo,chart_cache=chart_cache)
-            critical = result["clearance"]
-            min_gap = critical["lower_m"]
-            if min_gap <= 0 or min_gap < case.plan_clearance:
+            if (automatic and best is not None and best[0][0] == 2 and best[0][2] == 0
+                    and dominated_overload(route, path, loads, chart_columns, best[0])):
+                continue
+            try:
+                path, result = assess_route(path, repo, chart_cache, options,
+                                            geometry=geometry, require_clearance=True)
+            except _RouteClearanceRejected as exc:
                 required = (f"要求 {case.plan_clearance:.3f} m" if case.plan_clearance else "未证实有正净距")
-                rejected.setdefault("clearance", f"候选 P{critical['leg']-1} → P{critical['leg']}，"
-                                    f"{critical['start']:.1%}–{critical['end']:.1%}：{critical['pair']} "
-                                    f"净距下界 {min_gap:.3f} m，{required}。")
+                rejected.setdefault("clearance", f"候选 P{exc.leg-1} → P{exc.leg}，"
+                                    f"{exc.start:.1%}–{exc.end:.1%}：{exc.pair} "
+                                    f"净距下界 {exc.bound:.3f} m，{required}。")
                 continue
+            min_gap = result["clearance"]["lower_m"]
             breach = next(((tag, c.radius_limit, s, i) for i,(tag,c) in enumerate(zip("AB",pair))
                            if c.radius_limit is not None for s in result["segments"]
                            if s["radii"][i][1] > c.radius_limit + 1e-9), None)
@@ -690,12 +954,14 @@ def plan_transfer(case, repo, *, diagnostics=False):
                 rejected.setdefault("route-radius", f"候选路径 {segment['start']:.1%}–{segment['end']:.1%}，"
                                     f"{tag} 机工作幅度上界 {segment['radii'][index][1]:.2f} m，指定上限 {limit:.2f} m。")
                 continue
-            rank = candidate_rank(result["segments"],min_gap,hook_motion_cost(path))
+            rank = candidate_rank(result["segments"], min_gap, hook_motion_cost(path),
+                                  prefer_chart_coverage=automatic)
             if best is None or rank < best[0]:
-                best = rank,path,result
+                best = rank,path,result,geometry
     if best is None:
         raise TransferSearchError(tuple(rejected.values()) or ("本次搜索没有生成可校核的路径候选。",))
-    path, result = improve_clearance(best[1], best[2], repo, chart_cache)
+    _, path, result, geometry = best
+    path, result = improve_clearance(path, result, repo, chart_cache, geometry=geometry)
     if diagnostics:
-        result = analyze(path, repo, chart_cache=chart_cache, diagnostics=True)
+        result = analyze(path, repo, chart_cache=chart_cache, diagnostics=True, geometry=geometry)
     return path, result

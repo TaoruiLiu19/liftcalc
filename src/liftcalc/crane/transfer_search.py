@@ -6,10 +6,12 @@ import math
 from bisect import bisect_left
 from functools import lru_cache
 
-from liftcalc.crane.transfer import RouteTooLong, analyze, clearance, point_segment, segment_gap, world
+from liftcalc.crane.transfer import (
+    RouteTooLong, StationGeometry, _RouteClearanceRejected, analyze, clearance, point_segment, segment_gap, world,
+)
 
 
-def lattice_routes(case, charts, loads, limit, *, refinement=1):
+def lattice_routes(case, charts, loads, limit, *, refinement=1, boxes=None, peak_cap=math.inf):
     """Generate grid paths; the caller certifies every interpolated interval."""
     origin = case.start
     dx, dy = case.end[0]-origin[0], case.end[1]-origin[1]
@@ -35,9 +37,15 @@ def lattice_routes(case, charts, loads, limit, *, refinement=1):
                     | {case.end[2]})
     start = (0, 0, angles.index(origin[2]))
     goal = (nx if distance else 0, 0, angles.index(case.end[2]))
-    boxes = [c.box for c in case.cranes]
+    if boxes is None:
+        boxes = [c.box for c in case.cranes]
     columns = [[r["radius"] for r in chart] for chart in charts]
+    a, b = case.cranes
+    lug_a, lug_b = case.lugs
+    gap = case.plan_clearance + 0.12  # Leave room for the final swept-interval bound.
+    disks = [(o[:2], o[2]) for o in case.obstacles]
 
+    @lru_cache(maxsize=None)
     def coordinates(node):
         x, y, k = node
         return (origin[0]+x*step*ux-y*lateral*uy,
@@ -47,28 +55,28 @@ def lattice_routes(case, charts, loads, limit, *, refinement=1):
     def inspect(x, y, degrees):
         angle = math.radians(degrees)
         pose = (x, y, math.cos(angle), math.sin(angle))
-        gap = case.plan_clearance + 0.12  # Leave room for the final swept-interval bound.
-        if any(b.separation(pose, case.length, case.width) <= gap for b in boxes):
+        if (boxes[0].separation(pose, case.length, case.width) <= gap
+                or boxes[1].separation(pose, case.length, case.width) <= gap):
             return None
         if any(clearance(case, pose, o) <= gap for o in case.obstacles):
             return None
-        hooks = [world(pose, p) for p in case.lugs]
-        a, b = case.cranes
+        hooks = world(pose, lug_a), world(pose, lug_b)
+        radii = math.dist(a.center, hooks[0]), math.dist(b.center, hooks[1])
+        largest = max(radii)
+        if largest > peak_cap:
+            return None
         if segment_gap(a.center, hooks[0], b.center, hooks[1]) <= gap+a.boom_buffer+b.boom_buffer:
             return None
-        largest = 0.0
         covered = True
         fits = 0
-        for i, (crane, hook) in enumerate(zip(case.cranes, hooks)):
+        for i, (crane, hook, radius) in enumerate(zip(case.cranes, hooks, radii)):
             pad = gap+crane.boom_buffer
             if boxes[1-i].segment_distance(crane.center, hook) <= pad:
                 return None
-            if any(point_segment(o[:2], crane.center, hook) <= pad+o[2] for o in case.obstacles):
+            if any(point_segment(point, crane.center, hook) <= pad+disk_radius for point, disk_radius in disks):
                 return None
-            radius = math.dist(crane.center, hook)
             if crane.radius_limit is not None and radius > crane.radius_limit:
                 return None
-            largest = max(largest, radius)
             rows = charts[i]
             k = bisect_left(columns[i], radius)
             inside = bool(rows) and columns[i][0]+0.11 <= radius <= columns[i][-1]-0.11
@@ -118,24 +126,27 @@ def lattice_routes(case, charts, loads, limit, *, refinement=1):
                     return [coordinates(n) for n in bends]
                 return None
             x,y,k = node
-            pose = coordinates(node)
+            px, py, yaw = coordinates(node)
             for sx,sy,sk in directions:
                 nxt = (x+sx,y+sy,k+sk)
                 if not (-along_margin <= nxt[0] <= nx+along_margin and abs(nxt[1]) <= margin_cells
                         and 0 <= nxt[2] < len(angles)):
+                    continue
+                previous = best.get(nxt)
+                if previous is not None and previous <= (peak, steps+1):
                     continue
                 other = coordinates(nxt)
                 finish = inspect(*other)
                 if not allowed(finish):
                     continue
                 score = (max(peak, finish[0]), steps+1)
-                if nxt in best and best[nxt] <= score:
+                if previous is not None and previous <= score:
                     continue
-                middle = inspect(*((a+b)/2 for a,b in zip(pose,other)))
+                middle = inspect((px+other[0])/2, (py+other[1])/2, (yaw+other[2])/2)
                 if not allowed(middle):
                     continue
                 score = (max(score[0], middle[0]), steps+1)
-                if nxt not in best or score < best[nxt]:
+                if previous is None or score < previous:
                     best[nxt], parent[nxt] = score, node
                     heapq.heappush(queue, (*score,nxt))
         return None
@@ -148,12 +159,14 @@ def lattice_routes(case, charts, loads, limit, *, refinement=1):
             yield route
 
 
-def improve_clearance(path, result, repo, chart_cache):
+def improve_clearance(path, result, repo, chart_cache, *, geometry=None):
     """Maximize the certified gap in a small graph around a verified route."""
     route = path.route
     segments = result["segments"]
     if len(route) < 3 or any(s["unsafe"] or s["unknown"] for s in segments):
         return path, result
+    if geometry is None:
+        geometry = StationGeometry(path)
 
     peak_radius = [max(s["radii"][i][1] for s in segments) for i in (0, 1)]
     for i, crane in enumerate(path.cranes):
@@ -201,7 +214,11 @@ def improve_clearance(path, result, repo, chart_cache):
                         return path, result
                     edge = path.model_copy(update={"start":start,"end":end,"waypoints":[]})
                     try:
-                        check = analyze(edge, repo, chart_cache=chart_cache)
+                        check = analyze(edge, repo, chart_cache=chart_cache, geometry=geometry,
+                                        minimum_gap=old_gap - 1e-9)
+                    except _RouteClearanceRejected as exc:
+                        intervals_checked += exc.intervals_checked
+                        continue
                     except RouteTooLong:
                         continue
                     intervals_checked += len(check["segments"])
@@ -220,7 +237,7 @@ def improve_clearance(path, result, repo, chart_cache):
         waypoints.append(layers[node[0]][node[1]])
     trial = path.model_copy(update={"waypoints":list(reversed(waypoints))})
     try:
-        check = analyze(trial, repo, chart_cache=chart_cache)
+        check = analyze(trial, repo, chart_cache=chart_cache, geometry=geometry)
     except RouteTooLong:
         return path, result
     if admissible(check) and check["clearance"]["lower_m"] > old_gap + 1e-9:
