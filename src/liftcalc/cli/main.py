@@ -90,7 +90,7 @@ def calc(
 @app.command("report")
 def report(
     result_path: Path = typer.Option(..., "--in", "-i", help="result.json 路径"),
-    out: Path = typer.Option(..., "--out", "-o", help="docx 输出路径"),
+    out: Path = typer.Option(..., "--out", "-o", help="HTML 或 DOCX 输出路径"),
     case_path: Path | None = typer.Option(None, "--case", help="case.json（用于附录快照）"),
     title: str = typer.Option("吊装计算书", "--title", help="计算书标题"),
 ) -> None:

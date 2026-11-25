@@ -39,11 +39,14 @@ from liftcalc.data.repo import Repo
 from liftcalc.drawing.dxf import to_dxf
 from liftcalc.drawing.figures import elevation_figure
 from liftcalc.drawing.svg import to_svg
-from liftcalc.report.render import render_report
+from liftcalc.report.content import design_report, performance_citation, transfer_report
+from liftcalc.report.render import report_html, write_report
 from liftcalc.services.calc import run_case
+from liftcalc.services.cases import CaseMeta
 
 UI_ENV = "LIFTCALC_UI"
-FORMATS = ("dxf", "svg", "png", "docx")
+REPORT_FORMATS = ("html", "docx")
+FORMATS = ("dxf", "svg", "png", *REPORT_FORMATS)
 
 
 def _log_path() -> Path:
@@ -87,30 +90,47 @@ class DesktopApi:
         self._lock = RLock()
         self._snapshot = None
         self._transfer_sheets = {}
+        self._transfer_report = None
 
     def models(self):
         return self._repo.workbench_models()
 
     def calculate(self, case):
         if case.get("kind") == "rail.transfer":
-            from liftcalc.crane.transfer import DUAL_LIMIT, RouteTooLong, Transfer, TransferSearchError, plan_transfer
+            from liftcalc.crane.transfer import (
+                DUAL_LIMIT, RouteTooLong, Transfer, TransferSearchError, chart_rows, plan_transfer,
+            )
             from liftcalc.drawing.transfer import sheets
 
             inputs = Transfer.model_validate(case["transfer"])
+            meta = CaseMeta.model_validate(case.get("meta") or {})
+            report_id = uuid.uuid4().hex
             try:
                 inputs, result = plan_transfer(inputs, self._repo, diagnostics=True)
             except (TransferSearchError, RouteTooLong) as exc:
+                result = {"status": "unplanned", "report_id": report_id, "summary": str(exc),
+                          "reasons": list(exc.reasons) if isinstance(exc, TransferSearchError) else []}
+                report = transfer_report(inputs, result, (), meta.model_dump())
                 with self._lock:
                     self._transfer_sheets = {}
-                return {"status": "unplanned", "summary": str(exc),
-                        "reasons": list(exc.reasons) if isinstance(exc, TransferSearchError) else []}
-            drawings = sheets(inputs, result)
+                    self._transfer_report = report_id, report
+                return result
+            drawings = sheets(inputs, result, meta=meta)
             tokens = [uuid.uuid4().hex for _ in drawings]
             previews = [dict(id=token, title=sheet.title, kind=sheet.meta["kind"], svg=to_svg(sheet, margin=0))
                         for token, sheet in zip(tokens, drawings, strict=True)]
+            tables = {}
+            catalog = {(c.brand, c.model) for c in inputs.cranes}
+            documents = {key: self._repo.crane_model(*key).get("source_doc") for key in catalog}
+            sources = ["、".join(dict.fromkeys(
+                performance_citation(row["source_ref"], documents[c.brand, c.model])
+                for row in chart_rows(c, self._repo, tables) if row.get("source_ref")
+            )) for c in inputs.cranes]
+            report = transfer_report(inputs, result, drawings, meta.model_dump(), sources)
             with self._lock:
                 self._transfer_sheets = dict(zip(tokens, drawings, strict=True))
-            return {**result, "status": "planned", "poses": inputs.route,
+                self._transfer_report = report_id, report
+            return {**result, "status": "planned", "report_id": report_id, "poses": inputs.route,
                     "required_clearance": inputs.plan_clearance, "load_limit": DUAL_LIMIT,
                     "stations": [dict(center=c.center, heading=c.heading) for c in inputs.cranes],
                     "configurations": [dict(brand=c.brand, model=c.model, config=c.config, boom=c.boom)
@@ -146,16 +166,32 @@ class DesktopApi:
             data = to_dxf(sheet, Path(tmp) / "result.dxf").read_bytes()
         return base64.b64encode(data).decode("ascii")
 
+    def _get_report(self, token):
+        with self._lock:
+            if self._transfer_report and self._transfer_report[0] == token:
+                return self._transfer_report[1]
+            result, sheet = self._get(token)
+        if result is None:
+            raise ValueError("请从校核结果打开计算书。")
+        return design_report(result, figure=sheet)
+
+    def report(self, token):
+        return report_html(self._get_report(token))
+
     def render(self, token: str, fmt: str) -> tuple[bytes, str]:
         """导出文件的字节内容（原生保存对话框和浏览器下载共用）。"""
-        result, sheet = self._get(token)
-        if fmt not in FORMATS or (result is None and fmt == "docx") or (not sheet and fmt != "docx"):
+        if fmt not in FORMATS:
             raise ValueError("不支持该导出")
         name = f"liftcalc-{token[:8]}.{fmt}"
+        if fmt == "html":
+            return self.report(token).encode("utf-8"), name
         if fmt == "docx":
             with TemporaryDirectory() as tmp:
-                path = render_report(result, Path(tmp) / "result.docx")
+                path = write_report(self._get_report(token), Path(tmp) / "result.docx")
                 return path.read_bytes(), name
+        _, sheet = self._get(token)
+        if not sheet:
+            raise ValueError("无可导出的图纸。")
         if fmt == "svg":
             return to_svg(sheet, margin=0).encode("utf-8"), name
         if fmt == "dxf":
@@ -186,9 +222,12 @@ class BrowserApi(DesktopApi):
     """浏览器模式：保存改由下载路由完成，这里只校验。"""
 
     def export(self, token, fmt):
-        self._get(token)
         if fmt not in FORMATS:
             raise ValueError("不支持该导出")
+        if fmt in REPORT_FORMATS:
+            self._get_report(token)
+        elif not self._get(token)[1]:
+            raise ValueError("无可导出的图纸。")
         return True
 
 
@@ -526,6 +565,7 @@ window.__LIFTCALC_BROWSER__ = true;
     models: () => request("/api/models"),
     calculate: (input) => request("/api/calculate", input),
     dxf: async (id) => (await request("/api/dxf", { id })).data,
+    report: async (id) => (await request("/api/report", { id })).html,
     export: async (id, fmt) => {
       const info = await request("/api/export", { id, fmt });
       const link = document.createElement("a");
@@ -626,6 +666,16 @@ def _browser_app(api: BrowserApi, watchdog: _Watchdog):  # pragma: no cover - �
         except Exception as exc:
             return fail(exc)
 
+    @app.post("/api/report")
+    def preview_report():
+        watchdog.ping()
+        try:
+            token = (request.json or {}).get("id", "")
+            response.content_type = "application/json"
+            return json.dumps({"html": api.report(token)}, ensure_ascii=False)
+        except Exception as exc:
+            return fail(exc)
+
     @app.get("/download/<token>/<fmt>")
     def download(token, fmt):
         watchdog.ping()
@@ -636,7 +686,10 @@ def _browser_app(api: BrowserApi, watchdog: _Watchdog):  # pragma: no cover - �
         return HTTPResponse(
             body=data,
             headers={
-                "Content-Type": "application/octet-stream",
+                "Content-Type": {
+                    "html": "text/html; charset=utf-8",
+                    "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                }.get(fmt, "application/octet-stream"),
                 "Content-Disposition": f'attachment; filename="{name}"',
                 "Cache-Control": "no-store",
             },

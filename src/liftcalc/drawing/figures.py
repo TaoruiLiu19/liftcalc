@@ -836,7 +836,8 @@ def _load_table_rows(model: ElevationModel, load: dict[str, Any]) -> list[tuple[
 def _build_sheet_view(model: ElevationModel, model_notes: list[str],
                       cap: dict[str, Any], detail: dict[str, Any],
                       sheet: S.Sheet, orientation: str,
-                      axles: int | None, load: dict[str, Any] | None = None) -> Figure | None:
+                      axles: int | None, load: dict[str, Any] | None = None,
+                      *, project: str = "", designer: str = "") -> Figure | None:
     """在给定图幅上排一次版并出图。"""
     derived_angle = detail.get("boom_angle") is None
     load = load or {}
@@ -964,7 +965,8 @@ def _build_sheet_view(model: ElevationModel, model_notes: list[str],
         subtitle=model_name,
         scale_text=f"1:{denom_value}",
         drawing_no="LC-01",
-        project="起重能力校核",
+        project=project or "起重能力校核",
+        designer=designer,
         date="",
     )
 
@@ -994,13 +996,16 @@ def elevation_figure(result: ComputationResult) -> Figure | None:
         return None
     load = result.aux.get("load") or {}
     model, model_notes = _elevation_model(cap, detail, load)
-    brand = (result.aux.get('case', {}).get('crane') or {}).get('brand', '徐工')
+    case = result.aux.get("case") or {}
+    brand = (case.get("crane") or {}).get("brand", "徐工")
+    meta = case.get("meta") or {}
     axles = drawing_axles(cap, detail, brand)
 
     candidates: list[Figure] = []
     for width, height, name in ((297.0, 420.0, "portrait"), (420.0, 297.0, "landscape")):
         view = _build_sheet_view(model, model_notes, cap, detail,
-                                 S.Sheet(width=width, height=height), name, axles, load)
+                                 S.Sheet(width=width, height=height), name, axles, load,
+                                 project=meta.get("project", ""), designer=meta.get("author", ""))
         if view is not None:
             candidates.append(view)
     if not candidates:

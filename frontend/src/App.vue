@@ -14,10 +14,12 @@ import RiggingHeight from './RiggingHeight.vue'
 import { riggingRise, type RiggingMeasurement } from './riggingHeight'
 import Load3D from './Load3D.vue'
 import SheetViewer from './SheetViewer.vue'
+import ReportPreview from './ReportPreview.vue'
 import { craneModelKey, groupCraneModels } from './craneModels'
-import type { Snapshot, Model } from './types'
+import type { CaseAttribution, Snapshot, Model } from './types'
 const CadPane = defineAsyncComponent(() => import('./CadPane.vue'))
 const theme = ref('light')
+const attribution = reactive<CaseAttribution>({ project: '', author: '' })
 watch(theme, value => { document.documentElement.dataset.theme = value }, { immediate: true })
 const sheetViewer = ref<InstanceType<typeof SheetViewer>>()
 const models = ref<Model[]>([]),
@@ -103,7 +105,7 @@ function showCad() {
   tab.value = 'cad'
 }
 watch(
-  form,
+  [form, () => attribution.project, () => attribution.author],
   () => {
     revision++
     snapshot.value = null
@@ -155,6 +157,7 @@ async function calculate() {
     const data = await window.pywebview!.api.calculate({
       kind: 'crane.capability',
       mode: 'single',
+      meta: { ...attribution },
       crane: { model: model.model, brand: model.brand },
       config: form.config || null,
       payload: +form.payload,
@@ -178,9 +181,11 @@ async function calculate() {
       tab.value = 'sheet'
     }
   } catch (e) {
-    noticeError.value = true
-    notice.value = String(e)
-    snapshot.value = null
+    if (id === revision) {
+      noticeError.value = true
+      notice.value = String(e)
+      snapshot.value = null
+    }
   } finally {
     busy.value = false
   }
@@ -217,8 +222,9 @@ async function save(fmt: string) {
     <div class="header-tools"><button v-if="mode!=='home'" @click="mode='home'">← 返回首页</button></div>
     <select class="theme-select" aria-label="界面主题" v-model="theme"><option value="light">浅色</option><option value="dark">深色</option></select>
   </header>
-  <ModeHome v-if="mode==='home'" @choose="mode=$event" />
-  <KeepAlive><TransferPane v-if="mode === 'dual'" :models="models" /></KeepAlive>
+  <ModeHome v-if="mode==='home'" v-model:project="attribution.project" v-model:designer="attribution.author"
+            @choose="mode=$event" />
+  <KeepAlive><TransferPane v-if="mode === 'dual'" :models="models" :attribution="attribution" /></KeepAlive>
   <main v-show="mode === 'single'">
     <div class="workspace">
       <div class="inspector">
@@ -397,12 +403,13 @@ async function save(fmt: string) {
           <div class="tools exports" aria-label="导出本次工况" role="group">
             <span class="muted">导出本次工况</span>
             <button
-              v-for="fmt in ['svg', 'dxf', 'png', 'docx']"
+              v-for="fmt in ['svg', 'dxf', 'png']"
               :key="fmt"
-              :disabled="!snapshot || (fmt !== 'docx' && !snapshot.svg)"
+              :disabled="!snapshot.svg"
               :title="'导出本次工况 ' + fmt.toUpperCase()"
               @click="save(fmt)"
             >{{ fmt.toUpperCase() }}</button>
+            <ReportPreview :report-id="snapshot.id" />
           </div>
         </nav>
         <nav v-else class="stage-title">

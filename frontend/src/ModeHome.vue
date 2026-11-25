@@ -1,10 +1,20 @@
 <script setup lang="ts">
 defineEmits<{choose: [mode: 'single' | 'dual']}>()
+const project = defineModel<string>('project', { required: true })
+const designer = defineModel<string>('designer', { required: true })
 </script>
 <template>
   <main class="mode-home">
     <section aria-labelledby="home-title">
       <h1 id="home-title">选择吊装方式</h1>
+      <fieldset class="attribution">
+        <legend>工程署名</legend>
+        <div class="attribution-fields">
+          <label>工程名称<input v-model.trim="project" type="text" /></label>
+          <label>设计人<input v-model.trim="designer" type="text" /></label>
+        </div>
+        <p>选填，用于本次图纸标题栏和计算书。</p>
+      </fieldset>
       <div class="mode-cards">
         <button v-for="mode in (['single','dual'] as const)" :key="mode" :data-mode="mode" @click="$emit('choose', mode)">
           <svg viewBox="0 0 400 170" aria-hidden="true">
@@ -39,11 +49,17 @@ defineEmits<{choose: [mode: 'single' | 'dual']}>()
 .mode-home{justify-content:center;overflow:auto;padding:32px max(5vw,20px) 8vh}
 .mode-home section{width:min(100%,1060px);margin:auto}
 h1{font-size:clamp(28px,3.3vw,46px);letter-spacing:-.04em;margin:0 0 26px}
+.attribution{min-width:0;margin:0 0 22px;padding:8px 18px 12px;border:1px solid #94a3ad80;border-radius:12px}
+.attribution legend{padding:0 5px;font-weight:700}
+.attribution-fields{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:16px}
+.attribution-fields label{margin:0;font-size:13px}
+.attribution-fields input{min-height:36px;margin-bottom:0}
+.attribution p{margin:8px 0 0;font-size:12px;opacity:.83}
 .mode-cards{display:grid;grid-template-columns:1fr 1fr;gap:22px}
 .mode-cards button{position:relative;overflow:hidden;text-align:left;border-radius:17px;padding:0;box-shadow:0 12px 35px #14293314}
 .mode-cards svg{display:block;width:100%;background:#193d49;color:#b0d5d8}
 .mode-cards [data-mode=dual] svg{background:#294337;color:#ccdcc5}
 .card-copy{display:grid;gap:7px;padding:22px 60px 24px 24px;font-size:14px}
 .card-copy strong{font-size:24px}.enter{position:absolute;right:22px;bottom:30px;font-size:25px}
-@media(max-width:660px){.mode-cards{grid-template-columns:1fr}.mode-cards svg{height:105px}.card-copy{padding:12px 55px 12px 18px}.mode-home{justify-content:flex-start}}
+@media(max-width:660px){.mode-cards,.attribution-fields{grid-template-columns:1fr}.attribution-fields{gap:8px}.mode-cards svg{height:105px}.card-copy{padding:12px 55px 12px 18px}.mode-home{justify-content:flex-start}.mode-home section{margin:0 auto}}
 </style>

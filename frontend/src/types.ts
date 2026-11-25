@@ -1,3 +1,4 @@
+export type CaseAttribution = { project: string; author: string }
 export type MainHook = { mass_t: number; rated_t: number; is_default: number }
 export type Model = {
   brand: string
@@ -87,6 +88,7 @@ export type TransferScene = {
 }
 export type TransferResult = {
   status: 'planned'
+  report_id: string
   clearance: { lower_m: number; pair: string; leg: number; start: number; end: number }
   required_clearance: number
   load_limit: number
@@ -98,12 +100,13 @@ export type TransferResult = {
   loads: number[]
   segments: TransferSegment[]
 }
-export type TransferOutcome = TransferResult | { status: 'unplanned'; summary: string; reasons: string[] }
+export type TransferOutcome = TransferResult | { status: 'unplanned'; report_id: string; summary: string; reasons: string[] }
 export interface Api {
-  calculate(input: { kind: 'rail.transfer'; transfer: unknown }): Promise<TransferOutcome>
+  calculate(input: { kind: 'rail.transfer'; meta?: CaseAttribution; transfer: unknown }): Promise<TransferOutcome>
   models(): Promise<Model[]>
   calculate(input: Record<string, unknown>): Promise<Snapshot>
   dxf(id: string): Promise<string>
+  report(id: string): Promise<string>
   export(id: string, fmt: string): Promise<boolean>
 }
 declare global {

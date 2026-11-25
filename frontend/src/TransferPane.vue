@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { groupCraneModels } from './craneModels'
-import type { Model, TransferOutcome, TransferScene } from './types'
+import type { CaseAttribution, Model, TransferOutcome, TransferScene } from './types'
 
 import TransferPlot from './TransferPlot.vue'
 import TransferResults from './TransferResults.vue'
 import NumberEntry from './NumberEntry.vue'
 
-const props = defineProps<{models: Model[]}>()
+const props = defineProps<{models: Model[]; attribution: CaseAttribution}>()
 const form = reactive({
   length: 12, width: 3, height: 3, mass: 16, cg: [0,0,0], lugs: [[-5,0],[5,0]],
   start: [-11,0,90], auto_route: true, auto_stations: true, end: [11,0,90], bottom: null as number|null, plan_clearance: 0, factor: 1.1, gauge: 1.435,
@@ -57,6 +57,12 @@ function advance(target = step.value + 1) {
   goto(target)
 }
 watch(form, () => { revision++; reached.value = Math.min(reached.value, step.value); result.value = undefined; error.value = '' }, {flush:'sync'})
+watch(() => [props.attribution.project, props.attribution.author], () => {
+  revision++
+  result.value = undefined
+  reached.value = Math.min(reached.value, 3)
+  if (step.value === 4) goto(3)
+}, {flush:'sync'})
 function selectModel(i:number, key:string) {
   const group = modelChoices.value.find(group => group.key === key)
   const c = form.cranes[i]
@@ -141,7 +147,7 @@ async function calculate() {
         radius_limit:c.radius_limit || null,model:m.model,brand:m.brand,config:config || null}
     })
     const {bottom, ...inputs}=form
-    const data=await window.pywebview!.api.calculate({kind:'rail.transfer',
+    const data=await window.pywebview!.api.calculate({kind:'rail.transfer', meta: {...props.attribution},
       transfer:{...inputs,...(typeof bottom==='number'?{bottom}:{}),cranes}})
     if(id===revision){result.value=data;goto(4)}
   } catch(e){if(id===revision) error.value=String(e)}

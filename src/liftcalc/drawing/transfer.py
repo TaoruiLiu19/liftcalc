@@ -18,7 +18,7 @@ from liftcalc.drawing.style import (
 )
 
 
-def drawing(title, number, max_scale, kind):
+def drawing(title, number, max_scale, kind, *, meta=None):
     page = Sheet(420, 297)
     denominator = next((n for n in SCALE_LADDER if 1000/n <= max_scale),
                        max(500, math.ceil(1000/max_scale/50)*50))
@@ -27,7 +27,8 @@ def drawing(title, number, max_scale, kind):
     fig.meta["scale"] = 1000 / denominator
     draw_frame(fig, page)
     title_block(fig, page, title=title, subtitle="A3", scale_text=f"1:{denominator}",
-                drawing_no=f"DT-0{number}", project="列车双机抬吊上轨", date="", sheet_no=f"{number}/4")
+                drawing_no=f"DT-0{number}", project=(meta.project if meta else "") or "列车双机抬吊上轨",
+                designer=meta.author if meta else "", date="", sheet_no=f"{number}/4")
     return fig, 1000/denominator
 
 
@@ -35,13 +36,13 @@ def cross(fig, x, y, r):
     fig.add(Line(x-r,y,x+r,y,"CENTER"), Line(x,y-r,x,y+r,"CENTER"))
 
 
-def statics(case, result, corners):
+def statics(case, result, corners, *, meta=None):
     """First-angle projections of the same horizontal suspended load."""
     a, b = case.lugs
     top_z = case.bottom + case.height
     hook_z = [top_z + crane.sling_height for crane in case.cranes]
     fig, k = drawing("双机抬吊静力图", 1,
-                     min(262/(case.length+case.width), 145/(max(hook_z)+case.width)), "statics")
+                     min(262/(case.length+case.width), 145/(max(hook_z)+case.width)), "statics", meta=meta)
     length, width = k*case.length, k*case.width
     gap = 49
     left = 221 - (length + gap + width)/2
@@ -173,7 +174,7 @@ def patterned_path(fig, points, dash, gap, layer):
         distance = end
 
 
-def trajectory(case, result, corners):
+def trajectory(case, result, corners, *, meta=None):
     poses = [case.pose(s["start"]) for s in result["segments"]]+[case.pose(1)]
     disks = case.obstacles
     bounds = [world(p,c) for p in poses for c in corners]
@@ -186,7 +187,7 @@ def trajectory(case, result, corners):
     bounds.extend(p for line in rails for p in line)
     xs,ys = zip(*bounds)
     fig,k = drawing("双机转运轨迹平面图", 2,
-                    min(313/(max(xs)-min(xs)), 178/(max(ys)-min(ys))), "trajectory")
+                    min(313/(max(xs)-min(xs)), 178/(max(ys)-min(ys))), "trajectory", meta=meta)
     mx,my = (min(xs)+max(xs))/2,(min(ys)+max(ys))/2
     def paper(p):
         return 219+(p[0]-mx)*k,159+(p[1]-my)*k
@@ -318,7 +319,7 @@ def draw_end_view_profile(fig, paper, profile, center, factor):
                 fig.add(Polyline(points, True, item.layer))
 
 
-def crane_elevation(case, result, side):
+def crane_elevation(case, result, side, *, meta=None):
     """Show one crane in the transverse elevation of the initial lift."""
     tag = "AB"[side]
     crane, lug = case.cranes[side], case.lugs[side]
@@ -345,7 +346,7 @@ def crane_elevation(case, result, side):
     edge_right = max(half_width, *span, *body_ends)
     top = max(height + 2, model.tip_height + .9 if model else HINGE_H + .8)
     fig,k = drawing(f"{tag} 机起吊端视图", 3+side, min(310/(edge_right-edge_left), 178/top),
-                    f"elevation-{tag.lower()}")
+                    f"elevation-{tag.lower()}", meta=meta)
     ground = 80
     paper = _Paper(k, 222+k*(edge_left+edge_right)/2, ground)
     draw_ground(fig, 39, 401, ground)
@@ -425,7 +426,7 @@ def crane_elevation(case, result, side):
     return fig
 
 
-def sheets(case,result):
+def sheets(case, result, *, meta=None):
     corners = [(x*case.length/2,y*case.width/2) for x,y in ((-1,-1),(1,-1),(1,1),(-1,1))]
-    return (statics(case,result,corners), trajectory(case,result,corners),
-            crane_elevation(case,result,0), crane_elevation(case,result,1))
+    return (statics(case, result, corners, meta=meta), trajectory(case, result, corners, meta=meta),
+            crane_elevation(case, result, 0, meta=meta), crane_elevation(case, result, 1, meta=meta))

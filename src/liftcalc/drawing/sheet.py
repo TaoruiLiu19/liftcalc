@@ -144,7 +144,7 @@ def draw_ground(figure: Figure, x0: float, x1: float, y: float) -> None:
 
 def title_block(figure: Figure, sheet: Sheet, *, title: str, subtitle: str,
                 scale_text: str, drawing_no: str, project: str, date: str,
-                sheet_no: str = "1/1") -> Rect:
+                sheet_no: str = "1/1", designer: str = "") -> Rect:
     """标题栏（150 × 36），贴图框右下角。"""
     x1 = sheet.width - sheet.right
     x0 = x1 - 150.0
@@ -182,8 +182,11 @@ def title_block(figure: Figure, sheet: Sheet, *, title: str, subtitle: str,
     for x, label in zip((x0, *sign_cols), ("设计", "校核", "审核", "批准"), strict=False):
         text_in_band(figure, x + 2.5, row_c, row_b - row_c, label, 2.2,
                      layer=LAYER_NOTE)
-        figure.add(Line(x1=x + 12.0, y1=row_c + 2.4, x2=x + 34.0, y2=row_c + 2.4,
-                        layer=LAYER_THIN))
+        if x == x0 and designer:
+            text_in_band(figure, x + 12.0, row_c, row_b - row_c, designer, 2.5, max_width=22.0)
+        else:
+            figure.add(Line(x1=x + 12.0, y1=row_c + 2.4, x2=x + 34.0, y2=row_c + 2.4,
+                            layer=LAYER_THIN))
 
     # 第四行：日期/版本/页次/编号
     foot_cols = (x0 + 38.0, x0 + 80.0, x0 + 116.0)
