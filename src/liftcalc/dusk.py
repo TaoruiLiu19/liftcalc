@@ -22,6 +22,7 @@ import base64
 import contextlib
 import json
 import os
+import re
 import socket
 import sys
 import tempfile
@@ -47,6 +48,14 @@ from liftcalc.services.cases import CaseMeta
 UI_ENV = "LIFTCALC_UI"
 REPORT_FORMATS = ("html", "docx")
 FORMATS = ("dxf", "svg", "png", *REPORT_FORMATS)
+
+_INVALID_FILE_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+
+
+def _file_stem(text: str | None) -> str:
+    """工程名/图纸名转安全文件名主干；空值给统一兜底。"""
+    stem = _INVALID_FILE_CHARS.sub("", text or "").strip().rstrip(". ")
+    return stem[:60] or "未命名项目"
 
 
 def _log_path() -> Path:
@@ -91,6 +100,7 @@ class DesktopApi:
         self._snapshot = None
         self._transfer_sheets = {}
         self._transfer_report = None
+        self._names: dict[str, str] = {}
 
     def models(self):
         return self._repo.workbench_models()
@@ -105,6 +115,7 @@ class DesktopApi:
             inputs = Transfer.model_validate(case["transfer"])
             meta = CaseMeta.model_validate(case.get("meta") or {})
             report_id = uuid.uuid4().hex
+            self._names[report_id] = _file_stem(meta.project)
             try:
                 inputs, result = plan_transfer(inputs, self._repo, diagnostics=True)
             except (TransferSearchError, RouteTooLong) as exc:
@@ -117,6 +128,8 @@ class DesktopApi:
                 return result
             drawings = sheets(inputs, result, meta=meta)
             tokens = [uuid.uuid4().hex for _ in drawings]
+            for token in tokens:
+                self._names[token] = self._names[report_id]
             previews = [dict(id=token, title=sheet.title, kind=sheet.meta["kind"], svg=to_svg(sheet, margin=0))
                         for token, sheet in zip(tokens, drawings, strict=True)]
             tables = {}
@@ -143,6 +156,7 @@ class DesktopApi:
         result = run_case(case, self._repo)
         sheet = elevation_figure(result)
         token = uuid.uuid4().hex
+        self._names[token] = _file_stem((case.get("meta") or {}).get("project"))
         with self._lock:
             self._snapshot = token, result, sheet
         return {"id": token, "cap": result.aux["capability"], "warnings": result.warnings,
@@ -182,7 +196,9 @@ class DesktopApi:
         """导出文件的字节内容（原生保存对话框和浏览器下载共用）。"""
         if fmt not in FORMATS:
             raise ValueError("不支持该导出")
-        name = f"liftcalc-{token[:8]}.{fmt}"
+        project = self._names.get(token) or "未命名项目"
+        if fmt in REPORT_FORMATS:
+            name = f"{project}计算书.{fmt}"
         if fmt == "html":
             return self.report(token).encode("utf-8"), name
         if fmt == "docx":
@@ -192,6 +208,8 @@ class DesktopApi:
         _, sheet = self._get(token)
         if not sheet:
             raise ValueError("无可导出的图纸。")
+        title = _INVALID_FILE_CHARS.sub("", sheet.title or "").strip().rstrip(". ")[:60]
+        name = f"{project}{title or '图'}.{fmt}"
         if fmt == "svg":
             return to_svg(sheet, margin=0).encode("utf-8"), name
         if fmt == "dxf":

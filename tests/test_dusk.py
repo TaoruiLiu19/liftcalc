@@ -9,6 +9,18 @@ from liftcalc.data.repo import Repo
 from liftcalc.dusk import DesktopApi
 
 
+def test_export_name_uses_project_and_falls_back_when_blank(tmp_path):
+    db = tmp_path / "catalog.sqlite"
+    build_db(Path(__file__).resolve().parents[1] / "src/liftcalc/data/pack", db, "test")
+    api = DesktopApi(Repo(db))
+    case = {"kind": "crane.capability", "payload": 10, "crane": {"model": "QY70K-1", "brand": "徐工"}}
+    snapshot = api.calculate(case)
+    _, drawing = api.render(snapshot["id"], "dxf")
+    _, report = api.render(snapshot["id"], "html")
+    assert drawing == "未命名项目吊装立面图.dxf"
+    assert report == "未命名项目计算书.html"
+
+
 def test_snapshot_can_be_replaced_without_reusing_the_old_drawing(tmp_path):
     db = tmp_path / "catalog.sqlite"
     build_db(Path(__file__).resolve().parents[1] / "src/liftcalc/data/pack", db, "test")
