@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import math
 
+from liftcalc.drawing.annotation import nearby_labels, place_label
 from liftcalc.drawing.primitives import (
     ALIGN_CENTER,
     ALIGN_LEFT,
@@ -83,6 +84,8 @@ def h_dim(figure: Figure, x1: float, x2: float, y: float, content: str,
     arrow(figure, lo, y, -1.0, 0.0)
     arrow(figure, hi, y, 1.0, 0.0)
 
+    if not content:
+        return
     mid = (lo + hi) / 2.0 if text_at is None else text_at
     fits = text_width(content, height) + 2 * ARROW_SIZE + 1.0 < (hi - lo)
     if fits:
@@ -91,11 +94,12 @@ def h_dim(figure: Figure, x1: float, x2: float, y: float, content: str,
         else:
             _text_below(figure, mid, y, content, height=height)
     else:
-        # 尺寸界线之间放不下：文字移到右侧，加一条引出线
-        figure.add(Line(x1=hi, y1=y, x2=hi + 3.0 + text_width(content, height), y2=y,
-                        layer=LAYER_DIM))
-        figure.add(Text(x=hi + 3.5, y=y + height / 2 + TEXT_GAP, content=content,
-                        height=height, align=ALIGN_LEFT, layer=LAYER_DIM))
+        # 短尺寸的文字跨出尺寸界线时，放到界线末端的外侧。
+        outside_above = above if ref_y is None else ref_y < y
+        if outside_above:
+            _text_above(figure, mid, y + EXT_OVER, content, height=height)
+        else:
+            _text_below(figure, mid, y - EXT_OVER, content, height=height)
 
 
 def v_dim(figure: Figure, y1: float, y2: float, x: float, content: str,
@@ -117,6 +121,8 @@ def v_dim(figure: Figure, y1: float, y2: float, x: float, content: str,
     arrow(figure, x, lo, 0.0, -1.0)
     arrow(figure, x, hi, 0.0, 1.0)
 
+    if not content:
+        return
     mid = (lo + hi) / 2.0 if text_at is None else text_at
     span_room = hi - lo - 2 * ARROW_SIZE - 1.0
     # 放不下"名称=数值"时退化为只写数值（尺寸链惯例），仍竖排
@@ -230,8 +236,8 @@ def angle_dim(figure: Figure, cx: float, cy: float, radius: float,
         arrow(figure, px, py, tx * direction, ty * direction)
 
     if text_xy is not None:
-        figure.add(Text(x=text_xy[0], y=text_xy[1], content=content, height=height,
-                        align=text_align, layer=LAYER_DIM))
+        label = Text(*text_xy,content,height=height,align=text_align,layer=LAYER_DIM)
+        figure.add(place_label(figure,nearby_labels(label)) or label)
         return
 
     mid_deg = start_deg + span / 2.0 if text_at_deg is None else text_at_deg
@@ -256,24 +262,18 @@ def leader(figure: Figure, target: tuple[float, float], text_xy: tuple[float, fl
 
     knee 给出时，引线先在 knee 的 x 处折一次（工程图两段引线）。
     """
-    tx, ty = text_xy
-    width = text_width(content, height)
-    if align == ALIGN_CENTER:
-        x0 = tx - width / 2
-    elif align == ALIGN_RIGHT:
-        x0 = tx - width
+    label = Text(*text_xy, content, height=height, align=align, layer=LAYER_NOTE)
+    bounds = (32, 9, figure.width-9, figure.height-9) if figure.width and figure.height else None
+    label = place_label(figure, nearby_labels(label), bounds=bounds) or label
+    figure.add(label)
+    left, bottom, right, top = label.bbox()
+    middle = (top+bottom)/2
+    if target[0] > right:
+        attach = (right+1.5,middle)
+    elif target[0] < left:
+        attach = (left-1.5,middle)
     else:
-        x0 = tx
-    figure.add(Text(x=tx, y=ty, content=content, height=height,
-                    align=align, layer=LAYER_NOTE))
-
-    middle = ty - height / 2
-    if target[0] > x0 + width:
-        attach = (x0 + width + 1.5, middle)
-    elif target[0] < x0:
-        attach = (x0 - 1.5, middle)
-    else:
-        attach = (target[0], middle)
+        attach = (target[0],top+1.5 if target[1] > middle else bottom-1.5)
 
     if knee is None:
         figure.add(Line(x1=attach[0], y1=attach[1], x2=target[0], y2=target[1],

@@ -70,7 +70,7 @@ class LoadShape:
         if self.sling_height is not None and (
             not math.isfinite(self.sling_height) or self.sling_height <= 0
         ):
-            raise InfeasibleSectionError("吊索高度必须为正")
+            raise InfeasibleSectionError("吊物顶面至吊钩中心的竖向距离必须为正")
 
     # ---- 派生量 -----------------------------------------------------------
     @property
@@ -158,12 +158,12 @@ def sling_report(shape: LoadShape, weight_t: float) -> SlingReport:
     """四索几何与索力。weight_t 是吊件重量（t），不含吊钩与索具。"""
     shape.validate()
     if not math.isfinite(weight_t) or weight_t <= 0:
-        raise InfeasibleSectionError("吊件重量必须为正")
+        raise InfeasibleSectionError("吊物质量必须为正")
 
     derived = shape.sling_height is None
     height = shape.default_sling_height() if derived else float(shape.sling_height or 0.0)
     if height <= 0:
-        raise InfeasibleSectionError("吊索高度必须为正")
+        raise InfeasibleSectionError("吊物顶面至吊钩中心的竖向距离必须为正")
 
     span_x = 2 * shape.lug_x
     span_y = 2 * shape.lug_y
@@ -171,7 +171,7 @@ def sling_report(shape: LoadShape, weight_t: float) -> SlingReport:
     fy = 2 * shape.cg_y / span_y
     if abs(fx) >= 1 or abs(fy) >= 1:
         raise InfeasibleSectionError(
-            "重心超出四个吊点围成的范围，吊物会倾覆；请调整吊点位置或重心"
+            "重心水平投影超出四个吊点围成的范围，无法维持所设水平吊装姿态"
         )
 
     items: list[Sling] = []
@@ -209,17 +209,17 @@ def sling_report(shape: LoadShape, weight_t: float) -> SlingReport:
     notes: list[str] = []
     if derived:
         notes.append(
-            f"未给吊索高度，按最短索与水平成 {DEFAULT_SLING_ANGLE_TO_HORIZONTAL:.0f}° "
+            f"未输入吊物顶面至吊钩中心的竖向距离，按最短吊索与水平面成 {DEFAULT_SLING_ANGLE_TO_HORIZONTAL:.0f}° "
             f"推算为 {height:.2f} m"
         )
     if max(angles) > MAX_SLING_ANGLE_FROM_VERTICAL + 1e-9:
         notes.append(
-            f"索与竖直夹角最大 {max(angles):.1f}°，超过 {MAX_SLING_ANGLE_FROM_VERTICAL:.0f}°，"
+            f"吊索与竖直方向夹角最大 {max(angles):.1f}°，超过 {MAX_SLING_ANGLE_FROM_VERTICAL:.0f}°，"
             "建议加长吊索或改用横梁"
         )
     if max(forces) - min(forces) > 1e-6:
         notes.append(
-            f"重心偏心使四索受力不均：最大 {max(forces):.2f} t、最小 {min(forces):.2f} t"
+            f"四根吊索的名义拉力因重心偏移而不同，最大 {max(forces)*9.80665:.2f} kN、最小 {min(forces)*9.80665:.2f} kN"
             f"（相差 {max(forces) / max(min(forces), 1e-9):.2f} 倍）"
         )
     if abs(shape.cg_x) > CG_TOL or abs(shape.cg_y) > CG_TOL:
@@ -242,7 +242,7 @@ def sling_report(shape: LoadShape, weight_t: float) -> SlingReport:
 def required_lift_height(shape: LoadShape, clearance: float) -> float:
     """所需起升高度 = 吊物底净空 + 吊物高度 + 吊索竖直高度（吊钩中心离地）。"""
     if not math.isfinite(clearance) or clearance < 0:
-        raise InfeasibleSectionError("吊物底净空不得为负")
+        raise InfeasibleSectionError("吊物底面离地高度不得为负")
     report = sling_report(shape, weight_t=1.0)
     return clearance + shape.height + report.sling_height
 

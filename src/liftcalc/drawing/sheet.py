@@ -202,7 +202,7 @@ def title_block(figure: Figure, sheet: Sheet, *, title: str, subtitle: str,
 
 def perf_table(figure: Figure, x_right: float, y_top: float, rows: list[tuple[str, str]],
                *, width: float = 78.0, row_h: float = 5.2,
-               title: str = "起重性能（临界格）") -> Rect:
+               title: str = "采用的起重性能表数据") -> Rect:
     """右上角性能表：一行标题 + 若干"项目/数值"行。"""
     head_h = row_h + 1.2
     height = head_h + row_h * len(rows)

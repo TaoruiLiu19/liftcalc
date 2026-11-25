@@ -25,7 +25,7 @@ _VERDICT_TEXT = {Verdict.PASS: "满足", Verdict.FAIL: "不满足", Verdict.NA: 
 _CHECK_TITLES = {
     "capability.result": "反查结论",
     "capability.critical": "临界工况",
-    "capability.lift_height": "起升高度（净空）",
+    "capability.lift_height": "起升高度校核",
     "capability.left": "主吊（左机）",
     "capability.right": "辅吊（右机）",
     "capability.shortfall": "最接近工况与缺口",
@@ -91,10 +91,10 @@ def _add_table(document: Document, header: list[str], rows: list[list[str]]) -> 
 _PARAM_LABELS = {
     "kind": "计算类型",
     "mode": "计算方式",
-    "payload": "吊件重量 (t)",
-    "hook_mass": "吊钩重量 (t)",
-    "rigging": "索具重量 (t)",
-    "dynamic_factor": "动载系数",
+    "payload": "吊物质量 (t)",
+    "hook_mass": "吊钩组质量 (t)",
+    "rigging": "吊具及索具质量 (t)",
+    "dynamic_factor": "索具动载系数",
     "limit": "负荷率上限",
     "crane.brand": "品牌",
     "crane.model": "机型",
@@ -102,18 +102,18 @@ _PARAM_LABELS = {
     "second.model": "第二台机型",
     "left_share": "主吊承担比例",
     "asynchronism": "不同步系数",
-    "required_lift_height": "所需起升高度 (m)",
+    "required_lift_height": "所需吊钩中心离地高度 (m)",
     "load_width_m": "图示吊物宽 (m)",
     "load_height_m": "图示吊物高 (m)",
-    "clearance_m": "图示吊物底净空 (m)",
+    "clearance_m": "图示吊物底面离地高度 (m)",
     "boom_len": "臂长 (m)",
-    "radius": "幅度 (m)",
+    "radius": "工作幅度 (m)",
     "tonnage": "额定起重量 (t)",
 }
 
 _PARAM_VALUES = {
-    "crane.capability": "吊装能力反查",
-    "crane.select": "吊车选型校核",
+    "crane.capability": "起重能力校核",
+    "crane.select": "起重机选型校核",
     "single": "单机",
     "dual": "双机抬吊",
 }
@@ -156,8 +156,8 @@ def _load_section(document: Document, load: dict[str, Any], cap: dict[str, Any],
     """「吊物与重心」一节：真实尺寸、重心偏心、四索夹角与受力、双机分载。"""
     document.add_heading(f"3.{number} 吊物与重心", level=2)
     document.add_paragraph(
-        "吊物按长方体处理，形心在体心。重心坐标以形心为原点：x 沿吊物长度方向、"
-        "指向远离吊车；y 沿宽度方向；z 竖向向上。四个吊点位于顶面四角，可向内收进。"
+        "吊物按长方体处理，形心为长方体的几何中心。重心坐标以形心为原点：x 沿吊物长度方向、"
+        "指向远离起重机；y 沿宽度方向；z 竖向向上。四个吊点位于顶面四角，可向内收进。"
     )
     length = float(load["length_m"])
     width = float(load["width_m"])
@@ -174,20 +174,20 @@ def _load_section(document: Document, load: dict[str, Any], cap: dict[str, Any],
         ["项目", "取值"],
         [
             ["吊物外形（长×宽×高）", f"{length:.2f} × {width:.2f} × {height:.2f} m"],
-            ["吊物重量", f"{float(load.get('weight_t') or 0):.2f} t"],
-            ["形心位置", "体心（长方体几何中心）"],
+            ["吊物质量", f"{float(load.get('weight_t') or 0):.2f} t"],
+            ["形心位置", "长方体的几何中心"],
             ["重心相对形心", f"ex = {ex:+.2f} m，ey = {ey:+.2f} m，ez = {ez:+.2f} m"],
             ["水平偏心", f"{math.hypot(ex, ey):.2f} m"],
             ["吊点内缩", f"{inset:.2f} m"],
             [
-                "吊索竖直高度",
+                "吊物顶面至吊钩中心的竖向距离",
                 f"{sling_h:.2f} m"
-                + ("（按最短索与水平成 60° 推算）" if derived else "（按要求输入）"),
+                + ("（按最短吊索与水平面成 60° 推算）" if derived else "（按要求输入）"),
             ],
             [
-                "所需起升高度",
-                f"{required:.2f} m（净空 {clearance:.2f} + 吊物高 {height:.2f} + "
-                f"吊索高 {sling_h:.2f}）",
+                "所需吊钩中心离地高度",
+                f"{required:.2f} m（吊物底面离地高度 {clearance:.2f} + 吊物高 {height:.2f} + "
+                f"顶面至吊钩中心的竖向距离 {sling_h:.2f}）",
             ],
         ],
     )
@@ -200,7 +200,7 @@ def _load_section(document: Document, load: dict[str, Any], cap: dict[str, Any],
         )
         _add_table(
             document,
-            ["索号", "位置", "水平跨距 (m)", "与竖直夹角 (°)", "名义分载", "名义索力 (kN)", "静力范围 (kN)"],
+            ["索号", "位置", "吊点至吊钩铅垂线的水平距离 (m)", "与竖直夹角 (°)", "名义竖向分担比例", "名义拉力 (kN)", "静力范围 (kN)"],
             [
                 [
                     str(item["index"]),
@@ -223,8 +223,8 @@ def _load_section(document: Document, load: dict[str, Any], cap: dict[str, Any],
             else f"夹角范围 {min_angle:.1f}°～{max_angle:.1f}°（与竖直方向）"
         )
         document.add_paragraph(
-            f"名义最大索力 {float(load.get('max_force_t') or 0)*9.80665:.2f} kN，"
-            f"名义最小索力 {float(load.get('min_force_t') or 0)*9.80665:.2f} kN。{angle_text}。"
+            f"名义最大吊索拉力 {float(load.get('max_force_t') or 0)*9.80665:.2f} kN，"
+            f"名义最小吊索拉力 {float(load.get('min_force_t') or 0)*9.80665:.2f} kN。{angle_text}。"
             "静力范围按固定水平姿态和各索仅受拉确定，各上限分别取值。"
         )
 
@@ -247,7 +247,7 @@ def _load_section(document: Document, load: dict[str, Any], cap: dict[str, Any],
         right = cap.get("right") or {}
         _add_table(
             document,
-            ["机组", "分载比例", "计算荷载 (t)"],
+            ["机组", "分载比例", "计算总起重量 (t)"],
             [
                 ["主吊", f"{float(split['left_share']):.0%}",
                  f"{float(left.get('required') or 0):.2f}"],
@@ -256,7 +256,7 @@ def _load_section(document: Document, load: dict[str, Any], cap: dict[str, Any],
             ],
         )
         document.add_paragraph(
-            "两台各自的计算荷载已乘不同步系数后，再按上述比例分配。"
+            "将放大前的计算总起重量乘不同步系数，再按上述比例分配至两台起重机。"
         )
 
     for note in load.get("notes") or []:
@@ -283,8 +283,8 @@ def render_report(
     subtitle = document.add_paragraph()
     subtitle.alignment = WD_ALIGN_PARAGRAPH.CENTER
     kind_titles = {
-        "crane.capability": "吊装能力反查",
-        "crane.select": "吊车选型校核",
+        "crane.capability": "起重能力校核",
+        "crane.select": "起重机选型校核",
         "lifting_eye.check": "吊耳强度校核",
         "lifting_beam.check": "平衡梁校核",
         "lifting_rigging.check": "索具校核",
@@ -361,7 +361,7 @@ def render_report(
     section_no = index
     if cap:
         case = result.aux.get("case") or {}
-        document.add_heading(f"3.{section_no} 反查详细计算过程", level=2)
+        document.add_heading(f"3.{section_no} 起重能力校核过程", level=2)
         detail_no = f"3.{section_no}"
 
         # 6.1 荷载组成
@@ -371,15 +371,15 @@ def render_report(
         factor = float(case.get("dynamic_factor") or 1.1)
         rigging_design = rigging * factor
         total = float(cap.get('required', payload + hook + rigging_design))
-        document.add_heading(f"{detail_no}.1 计算荷载的组成", level=3)
+        document.add_heading(f"{detail_no}.1 计算总起重量的组成", level=3)
         _add_table(
             document,
             ["项目", "计算式", "数值 (t)"],
             [
-                ["吊件重量", "G", f"{payload:.3f}"],
-                ["吊钩重量", "g_h", f"{hook:.3f}"],
-                ["索具重量 × 动载系数", f"g_r × k = {rigging:.3f} × {factor:g}", f"{rigging_design:.3f}"],
-                ["计算荷载", "G + g_h + g_r·k", f"{total:.3f}"],
+                ["吊物质量", "G", f"{payload:.3f}"],
+                ["吊钩组质量", "g_h", f"{hook:.3f}"],
+                ["吊具及索具质量 × 动载系数", f"g_r × k = {rigging:.3f} × {factor:g}", f"{rigging_design:.3f}"],
+                ["计算总起重量", "G + g_h + g_r·k", f"{total:.3f}"],
             ],
         )
 
@@ -403,7 +403,7 @@ def render_report(
                 rows.append([config or '默认', f'{boom:g}', '—' if last is None else f'{last:g}',
                              following_text])
             if rows:
-                _add_table(document, ['配置', '臂长 (m)', '满足的最大表档 (m)', '下一候选及原因'], rows)
+                _add_table(document, ['配置', '臂长 (m)', '满足的最大表列工作幅度 (m)', '下一候选及原因'], rows)
         elif points:
             # 6.2 逐臂扫描
             document.add_heading(f"{detail_no}.2 逐臂长扫描结果", level=3)
@@ -428,16 +428,16 @@ def render_report(
                     rows.append([f"{boom:g}", "0", "—", "—", "—", "全表超限，该臂长不可用"])
             _add_table(
                 document,
-                ["臂长 (m)", "可用格点数", "该臂最远幅度 (m)", "该格额定 (t)", "负荷率", "再远一档为什么不行"],
+                ["臂长 (m)", "可用格点数", "该臂长下最大工作幅度 (m)", "表列额定总起重量 (t)", "负荷率", "下一较大工作幅度的校核结果"],
                 rows,
             )
             document.add_paragraph(
-                "反查取所有臂长中最远的那个可用格点，即为结论中的最远工作幅度。"
+                "反查取所有臂长中最远的那个可用格点，即为结论中的最大工作幅度。"
             )
 
         # 6.3 临界格算术
         if cap.get("ok") and cap.get("rated_load"):
-            document.add_heading(f"{detail_no}.3 临界格点的判定算术", level=3)
+            document.add_heading(f"{detail_no}.3 采用工况的负荷率校核", level=3)
             rated = float(cap["rated_load"])
             radius = float(cap["max_radius"])
             ratio = total / rated
@@ -445,13 +445,13 @@ def render_report(
                 document,
                 ["步骤", "计算", "结果"],
                 [
-                    ["临界格", f"臂长 {float(cap['boom_len']):g} m、幅度 {radius:g} m", f"额定 {rated:g} t"],
+                    ["采用工况", f"臂长 {float(cap['boom_len']):g} m、幅度 {radius:g} m", f"额定 {rated:g} t"],
                     ["负荷率", f"{total:.3f} ÷ {rated:g}", f"{ratio:.3f}"],
                     ["判据", f"{ratio:.3f} ≤ {limit:.0%}", "按当前假设满足"],
                 ],
             )
         elif not cap.get("ok") and cap.get('shortfall_t') is not None:
-            document.add_heading(f"{detail_no}.3 不能吊时的缺口", level=3)
+            document.add_heading(f"{detail_no}.3 负荷率超限时的起重量差额", level=3)
             document.add_paragraph(
                 f"全部格点均超限。最有利的一格在幅度 {float(cap.get('closest_radius') or 0):g} m，"
                 f"负荷率 {float(cap.get('closest_utilization') or 0):.3f}，"
@@ -459,7 +459,7 @@ def render_report(
             )
 
         document.add_paragraph(
-            "说明：以上结论均取自原厂性能表格点，按原厂说明第 7 条取下一档，未做插值。"
+            "本节采用原厂起重性能表的离散数据。指定工作幅度介于两表列值之间时，负荷率校核采用较大的表列工作幅度。"
         )
 
     # 4 结果汇总
@@ -488,7 +488,7 @@ def render_report(
         )
     elif result.verdict is Verdict.FAIL:
         failed = "、".join(check.title for check in result.checks if check.verdict is Verdict.FAIL)
-        document.add_paragraph(f"存在不满足项：{failed}。建议调整几何或降低计算荷载后复算。")
+        document.add_paragraph(f"存在不满足项：{failed}。建议调整几何或降低计算总起重量后复算。")
     else:
         document.add_paragraph("本次计算为参数统计，无通过/不通过判定。")
 
@@ -510,12 +510,12 @@ def render_report(
     if crane.get("model"):
         rows.append(["机型", f"{crane.get('brand', '')}　{crane['model']}", ""])
     for label, key, unit in (
-        ("吊件重量", "payload", "t"),
-        ("吊钩重量", "hook_mass", "t"),
-        ("索具重量", "rigging", "t"),
-        ("动载系数", "dynamic_factor", ""),
+        ("吊物质量", "payload", "t"),
+        ("吊钩组质量", "hook_mass", "t"),
+        ("吊具及索具质量", "rigging", "t"),
+        ("索具动载系数", "dynamic_factor", ""),
         ("负荷率上限", "limit", ""),
-        ("所需起升高度", "required_lift_height", "m"),
+        ("所需吊钩中心离地高度", "required_lift_height", "m"),
         ("主吊承担比例", "left_share", ""),
         ("不同步系数", "asynchronism", ""),
     ):
@@ -532,8 +532,8 @@ def render_report(
                               f" × {float(load['height_m']):g}", "m"],
             ["重心相对形心", f"({float(cg.get('x') or 0):+g}, {float(cg.get('y') or 0):+g}, "
                         f"{float(cg.get('z') or 0):+g})", "m"],
-            ["吊索高度", f"{float(load.get('sling_height_m') or 0):g}", "m"],
-            ["推算所需起升高度", f"{float(load.get('required_lift_height_m') or 0):.2f}", "m"],
+            ["吊物顶面至吊钩中心的竖向距离", f"{float(load.get('sling_height_m') or 0):g}", "m"],
+            ["推算所需吊钩中心离地高度", f"{float(load.get('required_lift_height_m') or 0):.2f}", "m"],
         ])
     if rows:
         _add_table(document, ["项目", "取值", "单位"], rows)

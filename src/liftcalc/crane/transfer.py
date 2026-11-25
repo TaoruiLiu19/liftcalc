@@ -47,8 +47,8 @@ class Crane(Inputs):
     hook: Positive
     hook_rating: Positive
     rigging: Nonnegative
-    sling_height: Positive
-    verified_height: Positive | None = None
+    sling_height: Positive = 2.0  # Elevation drawing only.
+    verified_height: Positive | None = None  # Accepted for older cases.
     radius_limit: Positive | None = None
 
 
@@ -66,7 +66,7 @@ class Transfer(Inputs):
     end: tuple[float, float, float]
     waypoints: list[tuple[float, float, float]] = Field(default_factory=list, max_length=30)
     gauge: Positive = 1.435
-    bottom: Positive
+    bottom: Nonnegative = 1.0  # Elevation drawing only.
     plan_clearance: Nonnegative = 0.0
     factor: Annotated[float, Field(ge=1)]
     obstacles: list[tuple[float, float, Positive]] = Field(default_factory=list, max_length=100)
@@ -93,10 +93,10 @@ class Transfer(Inputs):
         if span < 1e-6:
             raise ValueError("两吊点不能重合。")
         if abs((gx-a[0])*dy - (gy-a[1])*dx) / span > 1e-8:
-            raise ValueError("重心投影偏离两吊点连线，两根竖向吊索无法维持所设水平姿态。")
+            raise ValueError("重心水平投影偏离两吊点连线，两根竖向吊索无法维持所设水平姿态。")
         share = ((gx-a[0])*dx + (gy-a[1])*dy) / span**2
         if not 0 < share < 1:
-            raise ValueError("重心投影须在两吊点之间，两侧均须受拉。")
+            raise ValueError("重心水平投影须在两吊点之间，两侧均须受拉。")
         return 1-share, share
 
     @property
@@ -213,21 +213,23 @@ def chart_rows(crane, repo, cache):
     return cache[key]
 
 
-def analyze(case, repo, *, chart_cache=None):
+def analyze(case, repo, *, chart_cache=None, diagnostics=False):
+    """Check loads, working radii and horizontal clearances along the transfer."""
     shares = case.shares()
     boxes = [c.box for c in case.cranes]
     stationary = []
-    fixed_gap = (boxes[0].distance(boxes[1]), "A 机占地 / B 机占地")
+    fixed_gap = (boxes[0].distance(boxes[1]), "A 机占地包络 / B 机占地包络")
     if fixed_gap[0] <= 0:
-        stationary.append("两机占地矩形相交")
+        stationary.append("两台起重机的占地包络相交")
     for j,box in enumerate(boxes):
         for k, disk in enumerate(case.obstacles):
             distance = clearance(box,box.pose,disk)
-            fixed_gap = min(fixed_gap, (distance, f"{'AB'[j]} 机占地 / 障碍 {k+1}"))
+            pair = f"{'AB'[j]} 机占地包络 / 障碍物 {k+1} 禁入区"
+            fixed_gap = min(fixed_gap, (distance, pair))
             if distance <= 0:
-                stationary.append(f"{'AB'[j]}机占地与障碍{k+1}相交")
+                stationary.append(f"{pair} 接触或相交")
     if 0 < fixed_gap[0] < case.plan_clearance:
-        stationary.append(fixed_gap[1]+" 平面净距不足")
+        stationary.append(fixed_gap[1]+" 水平净距不足")
     if chart_cache is None:
         chart_cache = {}
     charts = []
@@ -245,7 +247,17 @@ def analyze(case, repo, *, chart_cache=None):
         (leg, start, end, travel, turn, sweep), depth = pending.pop()
         mid = (start+end)/2
         pose = case.pose(mid)
+        times = (start, mid, end)
         unsafe, unknown = stationary.copy(), []
+        evidence = {}
+
+        def explain(reason, text, progress=None):
+            if diagnostics:
+                evidence[reason] = dict(text=text, progress=progress)
+
+        if diagnostics:
+            for reason in stationary:
+                explain(reason, "两台起重机的站位在转运过程中固定。", 0.0)
         ratios = []
         radius_bounds = []
         hooks = [world(pose, lug) for lug in case.lugs]
@@ -255,81 +267,104 @@ def analyze(case, repo, *, chart_cache=None):
             delta = (travel + turn*math.hypot(*lug))/2
             radii = [r["radius"] for r in rows]
             if gross-crane.hook > crane.hook_rating:
-                unsafe.append(tag+"钩载超限")
-            witness = [math.dist(world(case.pose(t), lug), crane.center)
-                       for t in (start, mid, end)]
+                reason = f"{tag} 机主吊钩组承载超限"
+                unsafe.append(reason)
+                explain(reason, f"吊物分担质量及吊索具经系数放大后为 {gross-crane.hook:.2f} t，主吊钩组额定起重量 {crane.hook_rating:.2f} t。", 0.0)
+            witness = [math.dist(world(case.pose(t), lug), crane.center) for t in times]
             if not rows or min(witness) < radii[0] or max(witness) > radii[-1]:
-                unknown.append(tag+"幅度无表档")
+                reason = f"{tag} 机工作幅度无性能表数据"
+                unknown.append(reason)
+                if diagnostics:
+                    if not rows:
+                        explain(reason, f"当前工况没有 {crane.boom:g} m 臂长的起重性能表数据。")
+                    else:
+                        time, r = next((t, r) for t, r in zip(times, witness) if not radii[0] <= r <= radii[-1])
+                        explain(reason, f"工作幅度 {r:.2f} m，表列工作幅度范围 {radii[0]:g}–{radii[-1]:g} m。", time)
             lower, upper = radius-delta, radius+delta
             # Translation is linear. Only the rotating lug departs from its
             # endpoint chord, by at most max|p''(t)|/8 on this interval.
             upper = min(upper, max(witness[0], witness[-1])+math.hypot(*lug)*turn**2/8)
             if crane.radius_limit is not None:
                 if max(witness) > crane.radius_limit + 1e-9:
-                    unsafe.append(tag+"超过指定幅度上限")
+                    reason = f"{tag} 机超过指定工作幅度上限"
+                    unsafe.append(reason)
+                    peak = max(witness)
+                    explain(reason, f"工作幅度 {peak:.2f} m，指定上限 {crane.radius_limit:.2f} m。", times[witness.index(peak)])
                 elif upper > crane.radius_limit + 1e-9:
-                    unknown.append(tag+"区间幅度上限待核")
+                    reason = f"{tag} 机工作幅度上限待核"
+                    unknown.append(reason)
+                    explain(reason, f"区间工作幅度上界 {upper:.2f} m，指定上限 {crane.radius_limit:.2f} m。")
             if rows and (lower < radii[0] or upper > radii[-1]):
-                unknown.append(tag+"幅度包络超出表域")
+                unknown.append(f"{tag} 机工作幅度包络超出性能表范围")
             radius_bounds.append((max(0, lower), upper))
             bucket = rows[bisect_left(radii, lower):bisect_left(radii, upper)+1]
             if any(r["rated_load"] <= 0 for r in bucket):
-                unknown.append(tag+"区间缺有效额定载荷")
+                unknown.append(f"{tag} 机区间内缺有效额定起重量")
             ratio = max((gross/r["rated_load"] for r in bucket if r["rated_load"] > 0), default=None)
             ratios.append(ratio)
-            for r in witness:
+            overload = f"{tag} 机起重性能表负荷率超限"
+            for time, r in zip(times, witness):
                 k = bisect_left(radii, r)
                 if rows and radii[0] <= r and k < len(rows) and gross > rows[k]["rated_load"]*DUAL_LIMIT:
-                    unsafe.append(tag+"表档负荷率超限")
+                    unsafe.append(overload)
+                    rated = rows[k]["rated_load"]
+                    if diagnostics:
+                        detail = (f"负荷率 {gross/rated:.1%}，上限 {DUAL_LIMIT:.0%}。" if rated > 0
+                                  else "该工况缺有效额定起重量。")
+                        explain(overload, f"工作幅度 {r:.2f} m，采用表列工作幅度 {radii[k]:g} m。计算总起重量 {gross:.2f} t，"
+                                f"表列额定总起重量 {rated:.2f} t。{detail}", time)
                     break
-            if ratio is not None and ratio > DUAL_LIMIT and tag+"表档负荷率超限" not in unsafe:
-                unknown.append(tag+"区间可能超载")
-            required_h = case.bottom+case.height+crane.sling_height
-            for r in witness:
-                k = bisect_left(radii, r)
-                if k < len(rows) and radii[k] == r and rows[k]["lift_height"] is not None and rows[k]["lift_height"] < required_h:
-                    unsafe.append(tag+"钩高不足")
-                    break
-            chart_height = None
-            k = bisect_left(radii, radius)
-            if delta == 0 and k < len(rows) and radii[k] == radius:
-                chart_height = rows[k]["lift_height"]
-            if max(chart_height or 0, crane.verified_height or 0) < required_h:
-                unknown.append(tag+"全段可用钩高待核")
+            if ratio is not None and ratio > DUAL_LIMIT and overload not in unsafe:
+                reason = f"{tag} 机区间内负荷率可能超限"
+                unknown.append(reason)
+                if diagnostics:
+                    explain(reason, f"区间涉及表列工况的最高负荷率 {ratio:.1%}，上限 {DUAL_LIMIT:.0%}。")
         witnesses = (case.pose(start), pose, case.pose(end))
-        gaps = [("AB"[j]+"机", [box.separation(p,case.length,case.width) for p in witnesses])
+        gaps = [(f"{'AB'[j]} 机占地包络", [box.separation(p,case.length,case.width) for p in witnesses])
                 for j,box in enumerate(boxes)]
-        gaps += [(f"障碍{j+1}", [clearance(case,p,disk) for p in witnesses])
+        gaps += [(f"障碍物 {j+1} 禁入区", [clearance(case,p,disk) for p in witnesses])
                  for j,disk in enumerate(case.obstacles)]
         lower_gap = fixed_gap
         for label, distances in gaps:
             lower_gap = min(lower_gap, (distances[1]-sweep/2, "吊物 / "+label))
-            if min(distances) <= 0:
-                unsafe.append(label+"禁入区相交")
-            elif label.startswith("障碍") and min(distances) < case.plan_clearance:
-                unsafe.append("吊物 / "+label+" 平面净距不足")
+            closest = min(distances)
+            if closest <= 0:
+                reason = f"吊物与{label}接触或相交"
+                unsafe.append(reason)
+                explain(reason, f"吊物水平投影与{label}接触或相交。", times[distances.index(closest)])
+            elif label.startswith("障碍") and closest < case.plan_clearance:
+                reason = f"吊物 / {label} 水平净距不足"
+                unsafe.append(reason)
+                explain(reason, f"采样净距 {closest:.3f} m，小于要求 {case.plan_clearance:.3f} m。",
+                        times[distances.index(closest)])
             elif distances[1] <= sweep/2:
-                unknown.append(label+"区间净距待核")
+                unknown.append(f"吊物 / {label} 区间水平净距待核")
         for j, crane in enumerate(case.cranes):
             movement = (travel + turn*math.hypot(*case.lugs[j]))/2
             start_xy,end_xy = crane.center,hooks[j]
-            gaps = [("AB"[1-j]+"机",boxes[1-j].segment_distance(start_xy,end_xy))]
-            gaps += [(f"障碍{k+1}", point_segment(disk[:2],start_xy,end_xy)-disk[2])
+            gaps = [(f"{'AB'[1-j]} 机占地包络",boxes[1-j].segment_distance(start_xy,end_xy))]
+            gaps += [(f"障碍物 {k+1} 禁入区", point_segment(disk[:2],start_xy,end_xy)-disk[2])
                      for k,disk in enumerate(case.obstacles)]
             for label, dist in gaps:
                 gap = dist-crane.boom_buffer
-                lower_gap = min(lower_gap, (gap-movement, "AB"[j]+" 臂投影 / "+label))
+                lower_gap = min(lower_gap, (gap-movement, "AB"[j]+" 起重臂水平投影 / "+label))
                 if 0 < gap < case.plan_clearance:
-                    unsafe.append("AB"[j]+" 臂投影 / "+label+" 平面净距不足")
+                    reason = f"{'AB'[j]} 机起重臂水平投影 / {label} 水平净距不足"
+                    unsafe.append(reason)
+                    explain(reason, f"臂包络净距 {gap:.3f} m，小于要求 {case.plan_clearance:.3f} m。", mid)
                 if gap <= movement:
-                    tag = "AB"[j]+"臂平面包络与"+label+"禁区"
-                    (unsafe if gap<=0 else unknown).append(tag+("相交" if gap<=0 else "待核"))
+                    if gap <= 0:
+                        reason = f"{'AB'[j]} 机起重臂水平投影包络与{label}接触或相交"
+                        unsafe.append(reason)
+                        explain(reason, "该轨迹位置的水平净距为零或负值。", mid)
+                    else:
+                        unknown.append(f"{'AB'[j]} 机起重臂水平投影 / {label} 区间水平净距待核")
         c1,c2 = case.cranes
         gap = segment_gap(c1.center,hooks[0],c2.center,hooks[1])-c1.boom_buffer-c2.boom_buffer
         boom_bound = gap - (2*travel+turn*sum(math.hypot(*p) for p in case.lugs))/2
-        lower_gap = min(lower_gap, (boom_bound, "A 臂投影 / B 臂投影"))
+        lower_gap = min(lower_gap, (boom_bound, "A 机起重臂水平投影 / B 机起重臂水平投影"))
         if boom_bound <= 0:
-            unknown.append("两臂投影可能交叠，须核三维净空")
+            unknown.append("两台起重机的起重臂水平投影可能重叠，须校核三维净距")
         bound, pair = lower_gap
         # A midpoint sweep bound can straddle the requested clearance even
         # when the geometry has room. Recheck both halves before classifying.
@@ -346,11 +381,16 @@ def analyze(case, repo, *, chart_cache=None):
             continue
         if 0 < case.plan_clearance and bound < case.plan_clearance and not any(
                 pair in msg and "净距不足" in msg for msg in unsafe):
-            unknown.append(pair+" 未证实达到要求的平面净距")
+            reason = pair+" 未证实达到要求的水平净距"
+            unknown.append(reason)
+            explain(reason, f"此段净距下界 {max(0, bound):.3f} m，要求 {case.plan_clearance:.3f} m。")
         if critical is None or bound < critical["lower_m"]:
             critical = dict(lower_m=bound, pair=pair, leg=leg+1, start=start, end=end)
-        segments.append(dict(leg=leg+1, start=start, end=end, ratios=ratios, radii=radius_bounds,
-                             unsafe=unsafe, unknown=list(dict.fromkeys(unknown))))
+        segment = dict(leg=leg+1, start=start, end=end, ratios=ratios, radii=radius_bounds,
+                       unsafe=unsafe, unknown=list(dict.fromkeys(unknown)))
+        if diagnostics and evidence:
+            segment["evidence"] = evidence
+        segments.append(segment)
     # Zero means no positive clearance was established, not measured penetration.
     critical["lower_m"] = max(0.0, critical["lower_m"])
     return dict(shares=shares, loads=loads, segments=segments, clearance=critical)
@@ -555,10 +595,26 @@ def candidate_rank(segments, min_gap, motion):
     return severity, len(unsafe), len(unknown), *peaks, peak, -min_gap, motion
 
 
-def plan_transfer(case, repo):
+class TransferSearchError(ValueError):
+    def __init__(self, reasons):
+        super().__init__("在本次有限搜索范围内未找到满足连续避碰、指定工作幅度上限及水平净距的路径。")
+        self.reasons = tuple(reasons)
+
+
+def cargo_obstruction(case, boxes, pose):
+    for tag, box in zip("AB", boxes):
+        if box.separation(pose, case.length, case.width) <= 0:
+            return f"{tag} 机占地包络"
+    for index, obstacle in enumerate(case.obstacles, 1):
+        if clearance(case, pose, obstacle) <= 0:
+            return f"障碍物 {index} 禁入区"
+    return None
+
+
+def plan_transfer(case, repo, *, diagnostics=False):
     """Bounded corridor search, with continuous interval checks on each finalist."""
     if not (case.auto_route or case.auto_stations):
-        return case, analyze(case,repo)
+        return case, analyze(case,repo,diagnostics=diagnostics)
     from liftcalc.crane.transfer_search import improve_clearance, lattice_routes
 
     loads = [(case.mass*share+c.rigging)*case.factor+c.hook
@@ -566,19 +622,40 @@ def plan_transfer(case, repo):
     heading = math.atan2(case.end[1]-case.start[1], case.end[0]-case.start[0])
     best = None
     chart_cache = {}
+    rejected = {}
     endpoints = [(world(case.pose(0),lug),world(case.pose(1),lug)) for lug in case.lugs]
+    endpoint_reasons = []
+    for time, name in ((0, "起吊"), (1, "落位")):
+        for index, disk in enumerate(case.obstacles, 1):
+            gap = clearance(case, case.pose(time), disk)
+            if gap <= 0:
+                endpoint_reasons.append(f"{name}姿态的吊物与障碍物 {index} 禁入区接触或相交。")
+            elif gap < case.plan_clearance:
+                endpoint_reasons.append(f"{name}姿态的吊物至障碍物 {index} 禁入区的水平净距 {gap:.3f} m，"
+                                        f"小于要求 {case.plan_clearance:.3f} m。")
+    if endpoint_reasons:
+        raise TransferSearchError(endpoint_reasons)
     for pair in candidate_stations(case,heading):
         layout = case.model_copy(update={"cranes":pair})
         boxes = [cr.box for cr in pair]
-        fixed_gap = min([boxes[0].distance(boxes[1])] +
-                        [clearance(box,box.pose,o) for box in boxes for o in case.obstacles])
+        fixed_gap, fixed_pair = min([(boxes[0].distance(boxes[1]), "A 机占地包络 / B 机占地包络")] + [
+            (clearance(box,box.pose,o), f"{tag} 机占地包络 / 障碍物 {index} 禁入区")
+            for tag,box in zip("AB",boxes) for index,o in enumerate(case.obstacles,1)
+        ])
         if fixed_gap <= 0 or fixed_gap < case.plan_clearance:
+            reason = (f"{fixed_pair} 接触或相交。" if fixed_gap <= 0 else
+                      f"{fixed_pair} 净距 {fixed_gap:.3f} m，小于要求 {case.plan_clearance:.3f} m。")
+            rejected.setdefault("station", reason)
             continue
         # Every possible route at these stations has the same end poses.
         lower_bounds = [max(math.dist(cr.center,p) for p in ends)
                         for cr,ends in zip(pair,endpoints)]
-        if any(cr.radius_limit is not None and r > cr.radius_limit + 1e-9
-               for cr,r in zip(pair,lower_bounds)):
+        endpoint_limit = next(((tag, r, cr.radius_limit, "起吊" if math.dist(cr.center, ends[0]) >= r else "落位")
+                               for tag,cr,r,ends in zip("AB",pair,lower_bounds,endpoints)
+                               if cr.radius_limit is not None and r > cr.radius_limit + 1e-9), None)
+        if endpoint_limit:
+            tag, radius, limit, phase = endpoint_limit
+            rejected.setdefault("endpoint-radius", f"{phase}时 {tag} 机工作幅度 {radius:.2f} m，超过指定上限 {limit:.2f} m。")
             continue
         if best is not None and best[0][0] == 0 and max(lower_bounds) > best[0][3] + 1e-9:
             continue
@@ -590,22 +667,35 @@ def plan_transfer(case, repo):
             path = layout.model_copy(update={"waypoints":waypoints})
             # Cheap collision rejection before evaluating the entire load chart.
             samples = max(8,8*(len(waypoints)+1))
-            witness_poses = (path.pose(t/samples) for t in range(samples+1))
-            if any(any(box.separation(p,path.length,path.width)<=0 for box in boxes)
-                   or any(clearance(path,p,o)<=0 for o in path.obstacles)
-                   for p in witness_poses):
+            obstruction = next(((t/samples, label) for t in range(samples+1)
+                                if (label := cargo_obstruction(path,boxes,path.pose(t/samples)))), None)
+            if obstruction:
+                progress, label = obstruction
+                rejected.setdefault("collision", f"候选路径 {progress:.1%} 处，吊物与{label}接触或相交。")
                 continue
             result = analyze(path,repo,chart_cache=chart_cache)
-            min_gap = result["clearance"]["lower_m"]
+            critical = result["clearance"]
+            min_gap = critical["lower_m"]
             if min_gap <= 0 or min_gap < case.plan_clearance:
+                required = (f"要求 {case.plan_clearance:.3f} m" if case.plan_clearance else "未证实有正净距")
+                rejected.setdefault("clearance", f"候选 P{critical['leg']-1} → P{critical['leg']}，"
+                                    f"{critical['start']:.1%}–{critical['end']:.1%}：{critical['pair']} "
+                                    f"净距下界 {min_gap:.3f} m，{required}。")
                 continue
-            if any(c.radius_limit is not None and
-                   any(s["radii"][i][1] > c.radius_limit + 1e-9 for s in result["segments"])
-                   for i,c in enumerate(pair)):
+            breach = next(((tag, c.radius_limit, s, i) for i,(tag,c) in enumerate(zip("AB",pair))
+                           if c.radius_limit is not None for s in result["segments"]
+                           if s["radii"][i][1] > c.radius_limit + 1e-9), None)
+            if breach:
+                tag, limit, segment, index = breach
+                rejected.setdefault("route-radius", f"候选路径 {segment['start']:.1%}–{segment['end']:.1%}，"
+                                    f"{tag} 机工作幅度上界 {segment['radii'][index][1]:.2f} m，指定上限 {limit:.2f} m。")
                 continue
             rank = candidate_rank(result["segments"],min_gap,hook_motion_cost(path))
             if best is None or rank < best[0]:
                 best = rank,path,result
     if best is None:
-        raise ValueError("在本次有限搜索范围内未找到满足连续避碰、指定幅度上限及平面净距的路径。请核对起止位置、占地和可用场地。")
-    return improve_clearance(best[1], best[2], repo, chart_cache)
+        raise TransferSearchError(tuple(rejected.values()) or ("本次搜索没有生成可校核的路径候选。",))
+    path, result = improve_clearance(best[1], best[2], repo, chart_cache)
+    if diagnostics:
+        result = analyze(path, repo, chart_cache=chart_cache, diagnostics=True)
+    return path, result

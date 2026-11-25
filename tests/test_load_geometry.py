@@ -182,6 +182,9 @@ def test_case_reports_load_and_derived_height(repo: Repo) -> None:
     assert len(load["slings"]) == 4
     ids = {check.id for check in result.checks}
     assert {"load.cg", "load.sling"} <= ids
+    sling_check = next(check for check in result.checks if check.id == "load.sling")
+    assert sling_check.unit == "kN"
+    assert sling_check.value == pytest.approx(load["max_force_t"]*9.80665, abs=0.0001)
     # 性能表有起升高度列 → 用推算值参与查表
     assert any(check.id == "capability.lift_height" for check in result.checks)
 
@@ -237,7 +240,7 @@ def test_elevation_draws_cg_and_sling_table(repo: Repo) -> None:
     figure = elevation_figure(result)
     assert figure is not None
     texts = " ".join(item.content for item in figure.primitives if isinstance(item, Text))
-    for expected in ("吊物与吊索", "重心G", "所需起升高度", "吊物 L×B×H", "索1 远前"):
+    for expected in ("吊物与吊索", "重心G", "所需吊钩中心离地高度", "吊物 L×B×H", "索1 远前"):
         assert expected in texts, expected
     # 吊物按真实尺寸：h2 是真实高度、g 是真实长度
     assert "h2=2.50 m" in texts and "g=6.00 m" in texts
@@ -258,7 +261,7 @@ def test_load_figure_has_axes_and_cg(repo: Repo) -> None:
     assert hook.cy > cg.cy
     texts = " ".join(item.content for item in load_figure.primitives
                      if isinstance(item, Text))
-    for expected in ("x（长度，远离吊车）", "y（宽度 B=3.00 m）", "z（竖向）", "重心 G",
+    for expected in ("x（长度，远离起重机）", "y（宽度 B=3.00 m）", "z（竖向）", "重心 G",
                      "L=6.00 m", "H=2.50 m", "吊钩"):
         assert expected in texts, expected
     for item in load_figure.primitives:
@@ -277,7 +280,7 @@ def test_report_has_load_and_cg_section(repo: Repo, tmp_path: Path) -> None:
     headings = [paragraph.text for paragraph in document.paragraphs
                 if paragraph.style.name.startswith("Heading")]
     assert "3.1 吊物与重心" in headings
-    assert sum("反查详细计算过程" in heading for heading in headings) == 1
+    assert sum("起重能力校核过程" in heading for heading in headings) == 1
     tables = [[[cell.text for cell in row.cells] for row in table.rows]
               for table in document.tables]
     joined = "\n".join(

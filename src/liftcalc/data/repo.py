@@ -57,21 +57,31 @@ class Repo:
         return rows[0]
 
     def workbench_models(self) -> list[Row]:
-        models = self._rows('''SELECT DISTINCT m.brand, m.model, m.hook_main_t, cfg.name AS config
-            FROM crane_model m JOIN crane_config cfg ON cfg.model_id=m.id
-            JOIN crane_capacity c ON c.config_id=cfg.id ORDER BY m.brand, m.model, cfg.name''')
+        rows = self._rows("""
+            SELECT m.brand, m.model, m.tonnage_class AS tonnage_class_t, m.hook_main_t,
+                   cfg.name AS config, cfg.boom_len, MAX(c.rated_load) AS max_rated_t
+              FROM crane_model m JOIN crane_config cfg ON cfg.model_id=m.id
+              JOIN crane_capacity c ON c.config_id=cfg.id
+             GROUP BY m.id, cfg.name, cfg.boom_len
+             ORDER BY m.brand, m.model, cfg.name, cfg.boom_len
+        """)
         hooks = {}
         for hook in self.main_hooks():
             hooks.setdefault((hook["brand"], hook["model"]), []).append(hook)
-        lengths = {}
-        for row in self._rows("""SELECT DISTINCT m.brand, m.model, cfg.name, cfg.boom_len
-            FROM crane_config cfg JOIN crane_model m ON m.id=cfg.model_id
-            JOIN crane_capacity c ON c.config_id=cfg.id ORDER BY cfg.boom_len"""):
-            lengths.setdefault((row["brand"], row["model"], row["name"]), []).append(row["boom_len"])
-        for model in models:
-            model["booms"] = lengths[(model["brand"], model["model"], model["config"])]
-            model["main_hooks"] = hooks.get((model["brand"], model["model"]), [])
-        return models
+        configs: dict[tuple[str, str, str], Row] = {}
+        for row in rows:
+            brand, model, name = row["brand"], row["model"], row["config"]
+            key = brand, model, name
+            if key not in configs:
+                configs[key] = {
+                    "brand": brand, "model": model, "config": name,
+                    "tonnage_class_t": row["tonnage_class_t"], "hook_main_t": row["hook_main_t"],
+                    "main_hooks": hooks.get((brand, model), []), "booms": [], "boom_ratings": [],
+                }
+            config = configs[key]
+            config["booms"].append(row["boom_len"])
+            config["boom_ratings"].append({"boom_m": row["boom_len"], "max_rated_t": row["max_rated_t"]})
+        return list(configs.values())
 
     def main_hooks(self, brand: str | None = None, model: str | None = None) -> list[Row]:
         with self._connect() as conn:

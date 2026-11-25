@@ -8,6 +8,7 @@ import sqlite3
 from pathlib import Path
 
 from liftcalc.data.importer import build_db
+from liftcalc.data.repo import Repo
 from liftcalc.data.validate import validate_db
 
 PACK = Path(__file__).resolve().parents[1] / "src" / "liftcalc" / "data" / "pack"
@@ -23,6 +24,19 @@ def test_build_and_validate_shipped_pack(tmp_path: Path) -> None:
     report = validate_db(db)
     assert report.ok, report.issues
     assert report.checked["steel_section"] == stats.steel_sections
+    repo = Repo(db)
+    options = repo.workbench_models()
+    assert options and all(option["tonnage_class_t"] > 0 for option in options)
+    qy70_configs = [row for row in options if row["brand"] == "徐工" and row["model"] == "QY70K-1"]
+    chart = repo.model_capacity("徐工", "QY70K-1")
+    assert qy70_configs
+    for config in qy70_configs:
+        assert config["tonnage_class_t"] == 70
+        assert config["booms"] == [row["boom_m"] for row in config["boom_ratings"]]
+        for row in config["boom_ratings"]:
+            assert row["max_rated_t"] == max(point["rated_load"] for point in chart
+                                            if point["config_name"] == config["config"]
+                                            and point["boom_len"] == row["boom_m"])
 
 
 NEW_MODELS = [

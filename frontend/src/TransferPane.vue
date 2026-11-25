@@ -1,34 +1,36 @@
 <script setup lang="ts">
 import { computed, nextTick, reactive, ref, watch } from 'vue'
-import type { Model, TransferResult } from './types'
-import SheetViewer from './SheetViewer.vue'
+import { craneModelKey, groupCraneModels } from './craneModels'
+import type { Model, TransferOutcome, TransferScene } from './types'
 
 import TransferPlot from './TransferPlot.vue'
-import RiggingHeight from './RiggingHeight.vue'
-import { riggingRise, type RiggingMeasurement } from './riggingHeight'
+import TransferResults from './TransferResults.vue'
 import NumberEntry from './NumberEntry.vue'
 
 const props = defineProps<{models: Model[]}>()
 const form = reactive({
   length: 12, width: 3, height: 3, mass: 16, cg: [0,0,0], lugs: [[-5,0],[5,0]],
-  start: [-11,0,90], auto_route: true, auto_stations: true, end: [11,0,90], bottom: 1, plan_clearance: 0, factor: 1.1, gauge: 1.435,
+  start: [-11,0,90], auto_route: true, auto_stations: true, end: [11,0,90], bottom: null as number|null, plan_clearance: 0, factor: 1.1, gauge: 1.435,
   cranes: [-1,1].map(sign => ({index: -1, boom: 0, center: [0,sign*5.5], footprint_length: 10, footprint_width: 5, heading: 0, boom_buffer: 1,
-    hook: null as number|null, hook_rating: null as number|null, rigging: 0.3, sling: {datum:'top',value:null} as RiggingMeasurement,
-    verified_height: null as number|null, radius_limit: null as number|null})),
+    hook: null as number|null, hook_rating: null as number|null, rigging: 0.3, sling_height: null as number|null,
+    radius_limit: null as number|null})),
   obstacles: [] as number[][],
 })
-const activeSheet = ref(''), pick = ref(0), busy = ref(false), error = ref('')
-const result = ref<TransferResult>(), viewer = ref<InstanceType<typeof SheetViewer>>()
-const drawings = computed(() => [...(result.value?.drawings ?? [])].sort(
-  (a,b) => Number(b.kind==='trajectory') - Number(a.kind==='trajectory'),
-))
-const peakIntervals = computed(() => result.value ? [0,1].map(i =>
-  result.value!.segments.reduce((peak,s) => s.radii[i][1] > peak.radii[i][1] ? s : peak)
-) : [])
+const pick = ref(0), busy = ref(false), error = ref('')
+const result = ref<TransferOutcome>()
+const planned = computed(() => result.value?.status === 'planned' ? result.value : undefined)
 const points = computed(() => [...form.lugs,form.cg])
-const stages = ['吊物与吊点', 'A 机工况', 'B 机工况', '转向与场地', '图纸与校核']
+const stages = ['吊物、吊点与重心', 'A 机工况', 'B 机工况', '转运与场地', '图纸与校核']
 const step = ref(0), reached = ref(0)
 const crane = computed(() => form.cranes[step.value-1])
+const modelChoices = computed(() => groupCraneModels(props.models))
+const selectedConfig = computed(() => props.models[crane.value?.index])
+const selectedGroup = computed(() => {
+  const row = selectedConfig.value
+  const key = row && craneModelKey(row)
+  return modelChoices.value.find(group => group.key === key)
+})
+const boomRating = computed(() => selectedConfig.value?.boom_ratings.find(row => row.boom_m === crane.value.boom))
 const editor = ref<HTMLFormElement>(), panel = ref<HTMLElement>()
 const attempted = ref(false)
 let revision = 0
@@ -51,23 +53,32 @@ function advance(target = step.value + 1) {
     editor.value?.querySelector<HTMLInputElement>('input:invalid')?.focus()
     return
   }
-  if (step.value===0 && (split.value.error || form.cranes.some(c=>(riggingRise(c.sling,form.height) ?? 0)<=0))) return
+  if (step.value===0 && split.value.error) return
   if (target === 4 && !result.value) { void calculate(); return }
   goto(target)
 }
 watch(form, () => { revision++; reached.value = Math.min(reached.value, step.value); result.value = undefined; error.value = '' }, {flush:'sync'})
-function selectModel(i:number, index:number) {
+function selectConfig(i:number, index:number) {
   const c = form.cranes[i], model = props.models[index]
   if (!model) return
+  const previous = props.models[c.index]
+  const sameModel = previous && craneModelKey(previous) === craneModelKey(model)
   c.index = index
-  c.boom = model.booms.includes(25.98) ? 25.98 : model.booms[0]
+  if (!sameModel || !model.booms.includes(c.boom)) {
+    c.boom = model.booms.includes(25.98) ? 25.98 : model.booms[0]
+  }
+  if (sameModel) return
   const hook = model.main_hooks.find(h=>h.is_default)
   c.hook = hook?.mass_t ?? model.hook_main_t
   c.hook_rating = hook?.rated_t ?? null
 }
+function selectModel(i:number, key:string) {
+  const group = modelChoices.value.find(group => group.key === key)
+  if (group) selectConfig(i, group.configs[0].index)
+}
 watch(()=>props.models, models=>{
   const idx = models.findIndex(m=>m.model==='QY70K-1' && m.booms.includes(25.98))
-  if (models.length) for(let i=0;i<2;i++) selectModel(i,Math.max(idx,0))
+  if (models.length) for(let i=0;i<2;i++) selectConfig(i,Math.max(idx,0))
 },{immediate:true})
 const split = computed(() => {
   const [[ax, ay], [bx, by]] = form.lugs
@@ -76,16 +87,17 @@ const split = computed(() => {
     return {error: '请填写大于零的吊物尺寸和质量。'}
   for (const [i, p] of points.value.entries()) {
     if (p.some(v => !Number.isFinite(v)) || Math.abs(p[0]) > form.length/2 || Math.abs(p[1]) > form.width/2)
-      return {error: 'ABG'[i] + ' 点坐标超出顶面或有空值，请选择该点修正坐标。'}
+      return {error: i === 2 ? '请检查重心 G 的坐标。重心水平投影须在吊物轮廓内。'
+        : '请检查吊点 ' + 'AB'[i] + ' 的坐标。吊点须位于吊物顶面。'}
   }
   if (Math.abs(gz) >= form.height/2) return {error: 'G 点 Z 坐标须在吊物上下表面之间。'}
   const dx = bx - ax, dy = by - ay, span = Math.hypot(dx, dy)
   if (span < 1e-6) return {error: 'A、B 吊点重合，请移动一个吊点。'}
   if (Math.abs((gx-ax)*dy - (gy-ay)*dx) / span > 1e-8)
-    return {error: '重心投影偏离 AB 连线，当前吊点无法维持水平悬吊。'}
+    return {error: '重心水平投影偏离两吊点连线，按两根竖向吊索无法维持所设水平姿态。'}
   const shareB = ((gx-ax)*dx + (gy-ay)*dy) / span**2
   if (shareB <= 0 || shareB >= 1)
-    return {error: '重心投影须在 A、B 两个吊点之间，两侧吊索均须受拉。'}
+    return {error: '重心水平投影须位于 A、B 两吊点之间，两侧吊索均须受拉。'}
   return {shares: [1 - shareB, shareB]}
 })
 const snap=ref(true)
@@ -113,54 +125,41 @@ const previewStations = computed(() => {
     return {...c,center:[(ax+bx)/2+offset*nx,(ay+by)/2+offset*ny],heading:heading*180/Math.PI}
   })
 })
-const scene=computed(()=>({
-  length:form.length,width:form.width,points:points.value,pick:pick.value,gauge:form.gauge,
-  cranes:result.value ? form.cranes.map((c,i)=>({...c,...result.value!.stations[i]}))
-    : previewStations.value,
-  provisional:form.auto_stations && !result.value,
-  poses:result.value?.poses ?? [form.start,form.end],obstacles:form.obstacles,
-}))
-const runs=computed(()=>{
-  const out:{start:number;end:number;text:string;level:string;leg:number}[]=[]
-  for(const s of result.value?.segments ?? []){
-    const text=[...s.unsafe,...s.unknown].join('、') || '已核项满足'
-    const last=out[out.length-1]
-    if(last?.text===text && last.leg===s.leg) last.end=s.end
-    else out.push({start:s.start,end:s.end,leg:s.leg,text,level:s.unsafe.length?'fail':s.unknown.length?'pending':'pass'})
+const scene=computed<TransferScene>(() => {
+  const plan = planned.value
+  const failedSearch = step.value === 4 && result.value?.status === 'unplanned'
+  return {
+    length:form.length,width:form.width,points:points.value,pick:pick.value,gauge:form.gauge,
+    cranes:plan ? form.cranes.map((c,i)=>({...c,...plan.stations[i]}))
+      : failedSearch && form.auto_stations ? [] : previewStations.value,
+    provisional:form.auto_stations && !plan && !failedSearch,
+    poses:plan?.poses ?? [form.start,form.end],obstacles:form.obstacles,
   }
-  return out
 })
 async function calculate() {
   const id=revision
   busy.value=true; error.value=''
   try {
-    const cranes=form.cranes.map(({index,center,heading,sling,...c})=>{
+    const cranes=form.cranes.map(({index,center,heading,sling_height,...c})=>{
       const m=props.models[index]
-      return {...c,sling_height:riggingRise(sling,form.height), ...(form.auto_stations?{}:{center,heading}), radius_limit:c.radius_limit || null,verified_height:c.verified_height || null,model:m.model,brand:m.brand,config:m.config}
+      return {...c,...(typeof sling_height==='number'?{sling_height}:{}), ...(form.auto_stations?{}:{center,heading}),
+        radius_limit:c.radius_limit || null,model:m.model,brand:m.brand,config:m.config}
     })
-    const data=await window.pywebview!.api.calculate({kind:'rail.transfer',transfer:{...form,cranes}})
-    if(id===revision){result.value=data;activeSheet.value='';goto(4)}
+    const {bottom, ...inputs}=form
+    const data=await window.pywebview!.api.calculate({kind:'rail.transfer',
+      transfer:{...inputs,...(typeof bottom==='number'?{bottom}:{}),cranes}})
+    if(id===revision){result.value=data;goto(4)}
   } catch(e){if(id===revision) error.value=String(e)}
   finally {busy.value=false}
 }
-async function openSheet(svg:string){
-  activeSheet.value=svg
-  await nextTick()
-  viewer.value?.open()
-}
-async function save(id:string){
-  try {await window.pywebview!.api.export(id,'dxf')}
-  catch(e){error.value=String(e)}
-}
 const sizeFields = {length:'长 / m', width:'宽 / m', height:'高 / m', mass:'质量 / t'} as const
-const verdict=computed(()=>result.value?.segments.some(s=>s.unsafe.length)?'fail':result.value?.segments.some(s=>s.unknown.length)?'pending':'pass')
-const craneFields=['boom_buffer','hook','hook_rating','rigging','verified_height'] as const
-const craneLabels=['臂投影包络半宽 / m','主钩自重 / t','主钩额载 / t','本侧索具 / t','全段已核实可用钩高下限 / m（选填）']
+const craneFields=['boom_buffer','hook','hook_rating','rigging'] as const
+const craneLabels=['起重臂水平投影包络半宽 / m','主吊钩组质量 / t','主吊钩组额定起重量 / t','本侧吊具及索具质量 / t']
 </script>
 <template>
 <main class="transfer"><div class="workflow">
   <aside class="workflow-nav">
-    <h2>双机上轨</h2>
+    <h2>双机抬吊上轨</h2>
     <ol class="steps" aria-label="双机吊装步骤">
       <li v-for="(title,i) in stages" :key="title" :class="{active:step===i,done:i<reached}">
         <button type="button" :disabled="busy || i>reached" :aria-current="step===i?'step':undefined" @click="advance(i)"><b>{{i+1}}</b>{{title}}</button>
@@ -174,10 +173,6 @@ const craneLabels=['臂投影包络半宽 / m','主钩自重 / t','主钩额载 
         <section class="block"><h3>吊物尺寸与质量</h3>
           <div class="four"><NumberEntry v-for="(label,key) in sizeFields" :key="key" v-model="form[key]" :label="label" :min=".000001" :attempted="attempted"/></div>
         </section>
-        <div class="pair">
-          <RiggingHeight v-for="(c,i) in form.cranes" :key="i" v-model="c.sling"
-            :label="('AB'[i])+' 侧索具捆扎后高度'" :body-height="form.height" :attempted="attempted"/>
-        </div>
         <div class="columns">
           <TransferPlot v-bind="scene" @place="place"/>
           <section class="block point-editor" :class="{invalid:split.error}"><h3>选择编辑点</h3>
@@ -187,7 +182,7 @@ const craneLabels=['臂投影包络半宽 / m','主钩自重 / t','主钩额载 
             <p class="muted">点击图中顶面定位，或输入坐标微调。Z 从形心向上量取。</p>
             <p v-if="split.error" class="alert" role="alert">{{split.error}}</p>
             <section v-else class="split-preview" aria-live="polite">
-              <h3>吊物静态分载</h3>
+              <h3>吊物静力分配</h3>
               <dl><div v-for="(share,i) in split.shares" :key="i">
                 <dt>{{'AB'[i]}} 机</dt>
                 <dd>{{(form.mass * share).toFixed(2)}} t · {{(share * 100).toFixed(1)}}%</dd>
@@ -197,48 +192,72 @@ const craneLabels=['臂投影包络半宽 / m','主钩自重 / t','主钩额载 
         </div>
       </template>
       <template v-if="step===1 || step===2">
-        <section class="block"><h3>车型与配置</h3><div class="pair">
-          <label>车型及工况<select :value="crane.index" @change="selectModel(step-1,Number(($event.target as HTMLSelectElement).value))"><option v-for="(m,j) in models" :key="j" :value="j">{{m.brand}} {{m.model}} · {{m.config}}</option></select></label>
-          <label>固定臂长 / m<select v-model.number="crane.boom"><option v-for="b in models[crane.index]?.booms" :key="b" :value="b">{{b}}</option></select></label>
-        </div></section>
+        <section class="block"><h3>机型与工况</h3>
+          <div class="crane-picker">
+            <label>机型（标称最大起重量）
+              <select :value="selectedGroup?.key" :disabled="!modelChoices.length" @change="selectModel(step-1,($event.target as HTMLSelectElement).value)">
+                <option v-for="group in modelChoices" :key="group.key" :value="group.key">{{group.tonnage}} t · {{group.brand}} {{group.model}}</option>
+              </select>
+            </label>
+            <label class="config-picker">起重性能表工况
+              <select :value="crane.index" :title="selectedConfig?.config" :disabled="!selectedGroup" @change="selectConfig(step-1,Number(($event.target as HTMLSelectElement).value))">
+                <option v-for="config in selectedGroup?.configs" :key="config.index" :value="config.index">{{config.row.config}}</option>
+              </select>
+            </label>
+            <label>起重臂长度（全程固定） / m
+              <select v-model.number="crane.boom" :disabled="!selectedConfig">
+                <option v-for="boom in selectedConfig?.booms" :key="boom" :value="boom">{{boom}}</option>
+              </select>
+            </label>
+          </div>
+          <p v-if="boomRating" class="muted rating">所选工况及臂长的表列最大额定总起重量 <strong>{{boomRating.max_rated_t}} t</strong>。各作业位置的额定总起重量按工作幅度查表。</p>
+        </section>
         <div class="columns" :key="step">
           <div class="stack"><TransferPlot v-bind="scene" site :focus="step-1"/>
-            <section class="block"><h3>矩形占地包络</h3>
+            <section class="block"><h3>起重机占地包络</h3>
               <div class="pair">
-                <NumberEntry v-model="crane.footprint_length" label="占地长 / m" :min=".000001" :attempted="attempted"/>
-                <NumberEntry v-model="crane.footprint_width" label="占地宽 / m" :min=".000001" :attempted="attempted"/>
+                <NumberEntry v-model="crane.footprint_length" label="包络长度 / m" :min=".000001" :attempted="attempted"/>
+                <NumberEntry v-model="crane.footprint_width" label="包络宽度 / m" :min=".000001" :attempted="attempted"/>
               </div>
-              <p class="muted">以回转中心为中心，长宽须覆盖车体及展开支腿。初始尺寸为示例。自动站位须复核场地边界及地基。</p>
+              <p class="muted">矩形以起重机回转中心为中心，须包络车体及展开后的支腿。长轴方向角从场地 +X 轴逆时针量取。初始尺寸为示例。自动站位须复核场地边界及地基。</p>
               <label><input type="checkbox" v-model="form.auto_stations"> 自动搜索两机站位（全程固定）</label>
               <div v-if="!form.auto_stations" class="three">
-                <NumberEntry v-for="(_,k) in crane.center" :key="k" v-model="crane.center[k]" :label="'实测中心 '+'XY'[k]+' / m'" :attempted="attempted"/>
-                <NumberEntry v-model="crane.heading" label="长轴航向 / °" :attempted="attempted"/>
+                <NumberEntry v-for="(_,k) in crane.center" :key="k" v-model="crane.center[k]" :label="'回转中心 '+'XY'[k]+' / m'" :attempted="attempted"/>
+                <NumberEntry v-model="crane.heading" label="占地包络长轴方向角 / °" :attempted="attempted"/>
               </div>
             </section></div>
-          <section class="block"><h3>作业包络与吊具</h3><div class="pair">
+          <section class="block"><h3>作业范围与吊索具</h3><div class="pair">
             <NumberEntry v-model="crane.radius_limit" label="允许最大工作幅度 / m（选填）" :min=".000001" optional :attempted="attempted"/>
-            <NumberEntry v-for="(key,k) in craneFields" :key="key" v-model="crane[key]" :label="craneLabels[k]" :min="key==='rigging'?0:.000001" :optional="key==='verified_height'" :attempted="attempted"/>
+            <NumberEntry v-for="(key,k) in craneFields" :key="key" v-model="crane[key]" :label="craneLabels[k]" :min="key==='rigging'?0:.000001" :attempted="attempted"/>
           </div></section>
         </div>
       </template>
       <template v-if="step===3">
         <div class="columns"><div class="stack">
-          <TransferPlot v-bind="scene" site :preview="!!result"/>
+          <TransferPlot v-bind="scene" site :preview="!!planned"/>
           <p class="muted">根据起吊、落位、占地及障碍搜索中间姿态；规划完成后可慢速预演。</p>
-          <section class="block"><h3>场地禁入圆</h3>
-            <div v-for="(o,i) in form.obstacles" :key="i" class="obstacle"><div class="three"><NumberEntry v-for="(_,k) in o" :key="k" v-model="o[k]" :label="['X / m','Y / m','半径 / m'][k]" :min="k===2?.000001:undefined" :attempted="attempted"/></div><button type="button" @click="form.obstacles.splice(i,1)">移除障碍 {{i+1}}</button></div>
-            <button type="button" @click="form.obstacles.push([0,0,1])">＋ 添加障碍</button>
+          <section class="block"><h3>场地障碍物（圆形禁入区）</h3>
+            <div v-for="(o,i) in form.obstacles" :key="i" class="obstacle"><div class="three"><NumberEntry v-for="(_,k) in o" :key="k" v-model="o[k]" :label="['X / m','Y / m','半径 / m'][k]" :min="k===2?.000001:undefined" :attempted="attempted"/></div><button type="button" @click="form.obstacles.splice(i,1)">移除障碍物 {{i+1}}</button></div>
+            <button type="button" @click="form.obstacles.push([0,0,1])">＋ 添加障碍物</button>
           </section></div>
           <div class="stack">
-            <section v-for="(p,i) in [form.start,form.end]" :key="i" class="block"><h3>{{i?'对轨落位':'起吊位置'}}</h3><div class="three">
-              <NumberEntry v-for="(_,k) in p" :key="k" v-model="p[k]" :label="['中心 X / m','中心 Y / m','航向 / °'][k]" :attempted="attempted"/>
+            <section v-for="(p,i) in [form.start,form.end]" :key="i" class="block"><h3>{{i?'轨道落位姿态':'起吊姿态'}}</h3><div class="three">
+              <NumberEntry v-for="(_,k) in p" :key="k" v-model="p[k]" :label="['吊物形心 X / m','吊物形心 Y / m','吊物纵轴方向角 / °'][k]" :attempted="attempted"/>
             </div></section>
             <section class="block"><h3>转运条件</h3><div class="pair">
-              <NumberEntry v-model="form.bottom" label="底面离地 / m" :min=".000001" :attempted="attempted"/>
               <NumberEntry v-model="form.factor" label="载荷放大系数" :min="1" :attempted="attempted"/>
-              <NumberEntry v-model="form.plan_clearance" label="要求的最小平面净距 / m" :min="0" :attempted="attempted"/>
+              <NumberEntry v-model="form.plan_clearance" label="要求的最小水平净距 / m" :min="0" :attempted="attempted"/>
               <NumberEntry v-model="form.gauge" label="目标轨距 / m" :min=".000001" :attempted="attempted"/>
-            </div><p class="muted">按现场填写起止姿态；程序自动计算中间的平移与转角。</p></section>
+            </div><p class="muted">吊物纵轴方向角从场地 +X 轴逆时针量取。载荷放大系数用于各机分担的吊物质量和本侧吊索具质量。</p></section>
+            <details class="block">
+              <summary>图纸示意尺寸（选填）</summary>
+              <div class="pair">
+                <NumberEntry v-model="form.bottom" label="图示吊物底面离地高度 / m" :min="0" optional :attempted="attempted"/>
+                <NumberEntry v-for="(c,i) in form.cranes" :key="i" v-model="c.sling_height"
+                  :label="'AB'[i]+' 机图示顶面至吊钩中心距离 / m'" :min=".000001" optional :attempted="attempted"/>
+              </div>
+              <p class="muted">这些尺寸只用于绘图。留空时，底面离地按 1 m，顶面至吊钩中心按 2 m 示意。</p>
+            </details>
           </div></div>
       </template>
       <p v-if="error" class="alert" role="alert">{{error}}</p>
@@ -246,35 +265,7 @@ const craneLabels=['臂投影包络半宽 / m','主钩自重 / t','主钩额载 
         <button class="primary" :disabled="busy || ((step===1 || step===2) && !models.length)">{{step===3?(busy?'正在搜索与校核…':'自动规划并校核'):'下一步 →'}}</button>
       </div>
     </form>
-    <div v-else-if="result" class="transfer-output"><h2 tabindex="-1">图纸与校核</h2>
-      <div class="decision" :data-status="verdict"><strong>{{ {fail:'存在超限或禁入区相交',pending:'存在待核区间',pass:'所列校核项全段满足'}[verdict] }}</strong><span>A / B 计算总吊重　{{result.loads.map(x=>x.toFixed(2)).join(' / ')}} t</span></div>
-      <p>A / B 吊物静态分载　{{result.shares.map(s => (s * form.mass).toFixed(2) + ' t（' + (s * 100).toFixed(1) + '%）').join(' / ')}}</p>
-      <p v-if="verdict!=='pass'" class="muted">以下为几何候选路径，仍有超限或待核项。</p>
-      <p>A / B 全程峰值幅度上界　{{peakIntervals.map((s,i)=>(Math.ceil(100*s.radii[i][1])/100).toFixed(2)).join(' / ')}} m</p>
-      <div class="sheets">
-        <section v-for="d in drawings" :key="d.id" class="block" :class="{trajectory:d.kind==='trajectory'}">
-          <header><h3>{{d.title}}</h3><button @click="save(d.id)">导出 DXF</button></header>
-          <div class="paper"><button class="sheet-open" :aria-label="'放大'+d.title" @click="openSheet(d.svg)" v-html="d.svg"></button></div>
-        </section>
-      </div>
-      <SheetViewer ref="viewer" :svg="activeSheet"/>
-      <div class="columns result-layout">
-      <details class="block"><summary>自动规划的站位与调姿 · {{result.poses.length-1}} 段</summary>
-        <p>全程平面净距下界 ≥ {{(Math.floor(result.clearance.lower_m*1000)/1000).toFixed(3)}} m · {{result.clearance.pair}}</p>
-        <p>限制区间 P{{result.clearance.leg-1}} → P{{result.clearance.leg}}，路径进度 {{(result.clearance.start*100).toFixed(2)}}%–{{(result.clearance.end*100).toFixed(2)}}%</p>
-        <TransferPlot v-bind="scene" site preview :critical-progress="(result.clearance.start+result.clearance.end)/2"/>
-        <p v-for="(c,i) in result.stations" :key="i">{{'AB'[i]}} 机中心 ({{c.center.map(x=>x.toFixed(2)).join(', ')}}) m · 长轴 {{c.heading.toFixed(1)}}°</p>
-        <p v-for="(p,i) in result.poses" :key="i">P{{i}}　({{p.slice(0,2).map(x=>x.toFixed(2)).join(', ')}}) m · {{p[2].toFixed(1)}}°</p>
-      </details>
-        <div class="stack"><section v-for="(_,i) in form.cranes" :key="i" class="block"><h3>{{'AB'[i]}} 机校核</h3>
-          <p>幅度上界所在区间　P{{peakIntervals[i].leg-1}} → P{{peakIntervals[i].leg}}，路径进度 {{(100*peakIntervals[i].start).toFixed(1)}}%–{{(100*peakIntervals[i].end).toFixed(1)}}%</p>
-          <p>幅度包络　{{Math.min(...result.segments.map(s=>s.radii[i][0])).toFixed(2)}}–{{Math.max(...result.segments.map(s=>s.radii[i][1])).toFixed(2)}} m</p>
-          <p>已覆盖档最高负荷率　{{result.segments.some(s=>s.ratios[i]!==null)?(100*Math.max(...result.segments.map(s=>s.ratios[i]??0))).toFixed(1)+'%':'无数据'}}</p></section>
-          <details class="block"><summary>分段校核明细（{{runs.length}}）</summary><p v-for="r in runs" :key="r.start" :data-status="r.level">P{{r.leg-1}} → P{{r.leg}}　{{(100*r.start).toFixed(2)}}% – {{(100*r.end).toFixed(2)}}%　{{r.text}}</p></details></div></div>
-      <p v-if="error" class="alert" role="alert">{{error}}</p>
-      <p class="muted">校核范围为表档载荷、钩载、所填钩高及平面禁入区。臂间三维净空、索间干涉、回转扇区、不同步倾斜、地基与起落段需另行复核。</p>
-      <button @click="advance(3)">返回转向与场地</button>
-    </div>
+    <TransferResults v-else-if="result" :outcome="result" :scene="scene" :mass="form.mass" @back="advance(3)"/>
   </section>
 </div></main>
 </template>
@@ -283,24 +274,25 @@ const craneLabels=['臂投影包络半宽 / m','主钩自重 / t','主钩额载 
 :root[data-theme=dark] .transfer{--line:#44545c;--ink:#e1ebee;--quiet:#b3c3cb;--plot:#202d34;--accent:#83d3c8;--wash:#44766b52;--warm:#efb77e;--danger:#ffabb1;--danger-bg:#442932;--tile:#242e35}
 .workflow{display:grid;grid-template-columns:clamp(145px,16vw,210px) minmax(0,1fr);gap:18px;flex:1;min-height:0}
 .workflow-nav{align-self:start}.steps{flex-direction:column;gap:8px}.steps button{justify-content:flex-start;padding:10px}
-.workflow-panel{min-width:0;overflow:auto}.workflow-panel form,.transfer-output{padding:clamp(12px,2vw,24px);background:var(--tile);border:1px solid var(--line);border-radius:16px}
+.workflow-panel{min-width:0;overflow:auto}.workflow-panel form{padding:clamp(12px,2vw,24px);background:var(--tile);border:1px solid var(--line);border-radius:16px}
 .workflow-panel h2{font-size:24px;letter-spacing:-.03em;margin:0 0 18px}.workflow-panel h2:focus{outline:0}
 h3{font-size:15px;margin:0 0 10px}.block{padding:15px;border-radius:12px;border:1px solid var(--line);background:var(--tile);min-width:0}
 .columns{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(280px,1fr);gap:14px;margin-top:14px;align-items:start}
 .stack{display:grid;gap:12px}.pair,.three,.four{display:grid;gap:6px 12px}.three{grid-template-columns:repeat(3,minmax(0,1fr))}.four{grid-template-columns:repeat(4,minmax(0,1fr))}
-.point-tabs,.actions,.decision{display:flex;align-items:center;gap:8px}.point-tabs{margin-bottom:14px}
+.crane-picker{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.8fr) minmax(0,.9fr);column-gap:12px}
+.config-picker select{text-overflow:ellipsis}
+.rating{margin:6px 0 0}.rating strong{color:var(--ink)}
+.point-tabs,.actions{display:flex;align-items:center;gap:8px}.point-tabs{margin-bottom:14px}
 .point-tabs button[aria-pressed=true]{background:var(--accent);color:var(--tile);border-color:var(--accent)}
 .actions{justify-content:flex-end;margin-top:18px;padding-top:14px;border-top:1px solid var(--line)}.actions .primary{margin:0;width:auto;min-width:125px}
-.alert,[data-status=fail],:deep(.field-error){color:var(--danger)}.alert,.decision{padding:12px;border-radius:8px}.alert,.decision[data-status=fail]{background:var(--danger-bg);border-left:3px solid var(--danger)}
+.alert,:deep(.field-error){color:var(--danger)}.alert{padding:12px;border-radius:8px}.alert{background:var(--danger-bg);border-left:3px solid var(--danger)}
 .workflow-panel :deep(input[aria-invalid=true]){outline-color:var(--danger);border:1.5px solid var(--danger);background:var(--danger-bg)}:deep(.field-error){display:block;font-size:12px}
 .split-preview{border-top:1px solid var(--line);padding-top:12px}
 .split-preview dl{display:flex;flex-wrap:wrap;gap:8px 24px;margin:0}
 .split-preview dt{color:var(--quiet)}.split-preview dd{margin:3px 0 0;font-weight:600;font-variant-numeric:tabular-nums}
 .point-editor.invalid{border-color:var(--danger)}
-.decision{justify-content:space-between;background:var(--wash);flex-wrap:wrap}.decision[data-status=pending],[data-status=pending]{color:var(--warm)}
-.sheets{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,350px),1fr));gap:12px;margin-top:12px}.sheets .block{padding:10px}.sheets header{display:flex;align-items:center;justify-content:space-between}.sheets h3{margin:0}.sheets .paper{height:auto;aspect-ratio:420/297;padding:2px}.sheets .sheet-open{display:block}.result-layout{grid-template-columns:minmax(0,1.7fr) minmax(230px,1fr)}.paper{height:clamp(250px,49vh,580px);margin-top:12px}
-.sheets .trajectory{grid-column:1/-1}.sheets .trajectory .paper{aspect-ratio:auto;height:clamp(300px,56vh,740px)}
-.pose-tools{display:flex;gap:8px;margin-top:8px}.obstacle{padding-bottom:12px}.transfer-output nav{flex-wrap:wrap}.muted{color:var(--quiet)}
+.obstacle{padding-bottom:12px}.muted{color:var(--quiet)}
 @media(max-width:920px){.columns{grid-template-columns:1fr}.four{grid-template-columns:1fr 1fr}}
-@media(max-width:680px){.workflow{display:flex;flex-direction:column;gap:8px}.workflow-nav{width:100%}.workflow-nav h2{display:none}.steps{flex-direction:row;flex-wrap:wrap}.steps li{flex:auto}}
+@media(max-width:1040px){.crane-picker{grid-template-columns:minmax(0,1.65fr) minmax(0,1fr)}.crane-picker>label:first-child{grid-column:1/-1}}
+@media(max-width:680px){.workflow{display:flex;flex-direction:column;gap:8px}.workflow-nav{width:100%}.workflow-nav h2{display:none}.steps{flex-direction:row;flex-wrap:wrap}.steps li{flex:auto}.crane-picker{grid-template-columns:1fr}}
 </style>

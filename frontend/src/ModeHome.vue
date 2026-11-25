@@ -27,8 +27,8 @@ defineEmits<{choose: [mode: 'single' | 'dual']}>()
               <g v-for="(y,i) in [30,140]" :key="y"><rect x="183" :y="y-10" width="38" height="20" rx="3" fill="#455f52"/><path :d="'M202 '+y+' L'+(i?118:102)+' '+(i?121:49)" stroke-width="4"/><circle cx="202" :cy="y" r="4" fill="#263e36"/></g>
             </g>
           </svg>
-          <span class="card-copy"><strong>{{mode==='single'?'单机吊装':'双机上轨'}}</strong>
-            <span>{{mode==='single'?'校核单机工况，生成吊装立面图':'选择双机吊点与重心，校核转向轨迹'}}</span></span>
+          <span class="card-copy"><strong>{{mode==='single'?'单机吊装':'双机抬吊上轨'}}</strong>
+            <span>{{mode==='single'?'校核单机工况，生成吊装立面图':'选择双机吊点与重心，校核抬吊转运轨迹'}}</span></span>
           <span class="enter" aria-hidden="true">→</span>
         </button>
       </div>

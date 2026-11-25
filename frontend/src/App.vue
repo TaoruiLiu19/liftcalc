@@ -14,6 +14,7 @@ import RiggingHeight from './RiggingHeight.vue'
 import { riggingRise, type RiggingMeasurement } from './riggingHeight'
 import Load3D from './Load3D.vue'
 import SheetViewer from './SheetViewer.vue'
+import { craneModelKey, groupCraneModels } from './craneModels'
 import type { Snapshot, Model } from './types'
 const CadPane = defineAsyncComponent(() => import('./CadPane.vue'))
 const theme = ref('light')
@@ -28,9 +29,9 @@ const models = ref<Model[]>([]),
   usedCad = ref(false),
   step = ref(1)
 const form = reactive({
-  model: 'QY70K-1',
+  modelKey: craneModelKey({brand:'徐工',model:'QY70K-1'}),
   config: '',
-  radiusMode: '最远幅度',
+  radiusMode: '最大工作幅度',
   radius: '10',
   payload: '10',
   hook: '',
@@ -48,8 +49,14 @@ const form = reactive({
   cgY: '0',
   cgZ: '0',
 })
-const choices = computed(() => [...new Set(models.value.map((m) => m.model))]),
-  configs = computed(() => models.value.filter((m) => m.model === form.model))
+const choices = computed(() => groupCraneModels(models.value))
+const selectedModel = computed(() => choices.value.find(group => group.key === form.modelKey))
+const configs = computed(() => selectedModel.value?.configs.map(config => config.row) ?? [])
+const maxRated = computed(() => {
+  const ratings = configs.value.filter(row => !form.config || row.config === form.config)
+    .flatMap(row => row.boom_ratings.map(rating => rating.max_rated_t))
+  return ratings.length ? Math.max(...ratings) : null
+})
 const cap = computed(() => snapshot.value?.cap)
 const load = computed(() => snapshot.value?.load)
 const activeModel = computed(() => configs.value[0])
@@ -72,18 +79,18 @@ const cgInside = computed(
 )
 const rise = computed(() => riggingRise(form.sling,+form.loadHeight))
 const geometryIssue = computed(() => {
-  if (!geometryReady.value) return '请填写吊物长、宽、高和重量，数值均须大于零。'
+  if (!geometryReady.value) return '请填写吊物长、宽、高和质量，数值均须大于零。'
   if (!cgInside.value) return '重心超出吊物轮廓，请检查坐标。'
   const inset = +form.lugInset
   if (inset < 0 || inset >= Math.min(halfLength.value, halfDepth.value))
     return '吊点内缩须小于长、宽中较小尺寸的一半，且不能为负。'
   if (Math.abs(cg.value.x) >= halfLength.value - inset || Math.abs(cg.value.y) >= halfDepth.value - inset)
     return '重心水平投影须在四个吊点围成的区域内，请检查重心和吊点内缩。'
-  if (form.clearance === '' || +form.clearance < 0) return '请填写非负的吊物底净空。'
+  if (form.clearance === '' || +form.clearance < 0) return '请填写非负的吊物底面离地高度。'
   return ''
 })
 const slingMissing = computed(() => form.sling.datum !== 'estimate' && (rise.value ?? 0) <= 0)
-const inputIssue = computed(() => geometryIssue.value || (slingMissing.value ? '请填写捆扎后高度或选择按吊点几何估算。' : ''))
+const inputIssue = computed(() => geometryIssue.value || (slingMissing.value ? '请填写吊钩与吊物的竖向距离或选择按吊点几何估算。' : ''))
 const previewSlingHeight = computed(() => form.sling.datum === 'estimate'
   ? Math.hypot(halfLength.value - +form.lugInset - Math.abs(cg.value.x),
                halfDepth.value - +form.lugInset - Math.abs(cg.value.y)) * Math.sqrt(3)
@@ -137,23 +144,25 @@ async function calculate() {
       step.value = 1
       return
     }
+    const model = selectedModel.value
+    if (!model) return
     const mass = customHook.value ? form.hook : form.hookChoice
     if ((mass === '' && needsHookMass.value) || (mass !== '' && !(Number(mass) > 0))) {
       noticeError.value = true
-      notice.value = customHook.value ? '请按实车铭牌填写吊钩自重（吨）。' : '请选择实车主钩。'
+      notice.value = customHook.value ? '请按实车铭牌填写吊钩组质量（t）。' : '请选择实车主钩。'
       return
     }
     const data = await window.pywebview!.api.calculate({
       kind: 'crane.capability',
       mode: 'single',
-      crane: { model: form.model, brand: configs.value[0]?.brand || '徐工' },
+      crane: { model: model.model, brand: model.brand },
       config: form.config || null,
       payload: +form.payload,
       ...(mass === '' ? {} : { hook_mass: Number(mass) }),
       rigging: +form.rigging,
       limit: +form.limit,
       dynamic_factor: +form.factor,
-      target_radius: form.radiusMode === '指定幅度' ? +form.radius : null,
+      target_radius: form.radiusMode === '指定工作幅度' ? +form.radius : null,
       clearance_m: +form.clearance,
       load: {
         length_m: +form.length,
@@ -179,6 +188,7 @@ async function calculate() {
 async function init() {
   try {
     models.value = await window.pywebview!.api.models()
+    if (!selectedModel.value && choices.value.length) form.modelKey = choices.value[0].key
   } catch (e) {
     noticeError.value = true
     notice.value = String(e)
@@ -213,22 +223,22 @@ async function save(fmt: string) {
     <div class="workspace">
       <div class="inspector">
         <ol class="steps" aria-label="计算步骤">
-          <li v-for="item in [{ n: 1, t: '吊物与重心' }, { n: 2, t: '车型与工况' }]" :key="item.n"
+          <li v-for="item in [{ n: 1, t: '吊物与重心' }, { n: 2, t: '机型与工况' }]" :key="item.n"
               :class="{ active: step === item.n, done: step > item.n }">
             <button type="button" @click="goStep(item.n)"><b>{{ item.n }}</b>{{ item.t }}</button>
           </li>
         </ol>
 
         <form v-if="step === 1" @submit.prevent="goStep(2)">
-          <h2>吊物尺寸与重量</h2>
+          <h2>吊物尺寸与质量</h2>
           <div class="pair">
-            <label>长（沿幅度）/ m<input required type="number" step="any" min=".01" v-model="form.length" /></label>
-            <label>宽（垂直立面）/ m<input required type="number" step="any" min=".01" v-model="form.depth" /></label>
+            <label>长（沿立面水平方向）/ m<input required type="number" step="any" min=".01" v-model="form.length" /></label>
+            <label>宽（垂直于立面）/ m<input required type="number" step="any" min=".01" v-model="form.depth" /></label>
             <label>高 / m<input required type="number" step="any" min=".01" v-model="form.loadHeight" /></label>
-            <label>吊物重量 / t<input required type="number" step="any" min=".001" v-model="form.payload" /></label>
+            <label>吊物质量 / t<input required type="number" step="any" min=".001" v-model="form.payload" /></label>
           </div>
           <p class="hint">
-            原点在吊物形心。x 沿长度指向远离吊车的一侧，y 沿宽度，z 竖直向上。
+            原点在吊物形心。x 沿长度指向远离起重机的一侧，y 沿宽度，z 竖直向上。
           </p>
           <fieldset class="cg-field">
             <legend>重心坐标（相对形心）</legend>
@@ -242,62 +252,66 @@ async function save(fmt: string) {
               {{ cgInside ? '水平偏移改变吊钩位置；竖向偏移改变重心标记高度。' : '重心超出吊物轮廓，请检查坐标。' }}
             </p>
           </fieldset>
-          <RiggingHeight v-model="form.sling" label="索具捆扎后高度" :body-height="+form.loadHeight" estimate/>
+          <RiggingHeight v-model="form.sling" label="吊钩与吊物的竖向距离" :body-height="+form.loadHeight" estimate/>
           <details>
-            <summary>吊点与离地净空</summary>
+            <summary>吊点与离地高度</summary>
             <div class="pair">
               <label>吊点内缩 / m<input type="number" step="any" min="0" v-model="form.lugInset" /></label>
-              <label>吊物底净空 / m<input required type="number" step="any" min="0" v-model="form.clearance" /></label>
+              <label>吊物底面离地高度 / m<input required type="number" step="any" min="0" v-model="form.clearance" /></label>
             </div>
-            <p class="muted">所需钩中心高度等于吊物底净空加捆扎后总高度。</p>
+            <p class="muted">所需吊钩中心离地高度等于吊物底面离地高度加吊物底面至吊钩中心的竖向距离。</p>
           </details>
-          <button class="primary" :disabled="!!inputIssue">下一步：选择车型</button>
+          <button class="primary" :disabled="!!inputIssue">下一步：选择机型</button>
         </form>
 
         <form v-else @submit.prevent="calculate">
-          <h2>单机车型与工况</h2>
+          <h2>单机机型与工况</h2>
           <p class="summary">
             吊物 {{ form.length }}×{{ form.depth }}×{{ form.loadHeight }} m ·
             {{ form.payload }} t · 重心 ({{ cg.x.toFixed(2) }}, {{ cg.y.toFixed(2) }}, {{ cg.z.toFixed(2) }}) m
             <button type="button" class="link" @click="goStep(1)">修改</button>
           </p>
           <label
-            >机型<select v-model="form.model">
-              <option v-for="model in choices">{{ model }}</option>
+            >机型（标称最大起重量）<select v-model="form.modelKey">
+              <option v-for="model in choices" :key="model.key" :value="model.key">{{model.tonnage}} t · {{model.brand}} {{model.model}}</option>
             </select></label
           ><label
-            >性能表配置<select v-model="form.config">
-              <option value="">比较全部配置</option>
-              <option v-for="item in configs" :value="item.config">
+            >起重性能表工况<select v-model="form.config">
+              <option value="">比较全部工况</option>
+              <option v-for="item in configs" :key="item.config" :value="item.config">
                 {{ item.config }}
               </option>
-            </select></label
-          ><label
-            >查表方式<select v-model="form.radiusMode">
-              <option>最远幅度</option>
-              <option>指定幅度</option>
+            </select></label>
+          <p v-if="maxRated !== null" class="muted">
+            {{form.config ? '所选工况' : '已收录工况'}}的表列最大额定总起重量 <strong>{{maxRated}} t</strong>。
+            作业位置的额定总起重量按臂长与工作幅度查表。
+          </p>
+          <label
+            >工作幅度校核方式<select v-model="form.radiusMode">
+              <option>最大工作幅度</option>
+              <option>指定工作幅度</option>
             </select></label
           >
-          <label v-if="form.radiusMode === '指定幅度'"
-            >指定幅度 / m<input
+          <label v-if="form.radiusMode === '指定工作幅度'"
+            >指定工作幅度 / m<input
               required
               type="number"
               step="any"
               min=".001"
               v-model="form.radius"
           /></label>
-          <label v-if="hookOptions.length">实车主钩
+          <label v-if="hookOptions.length">实际安装的主吊钩组
             <select v-model="form.hookChoice" required>
-              <option disabled value="">请选择实车安装的主钩</option>
+              <option disabled value="">请选择实际安装的主吊钩组</option>
               <option v-for="hook in hookOptions" :key="hook.mass_t" :value="String(hook.mass_t)">
-                {{ hook.rated_t }} t 钩 · 自重 {{ hook.mass_t }} t
+                额定起重量 {{ hook.rated_t }} t · 吊钩组质量 {{ hook.mass_t }} t
               </option>
-              <option value="manual">手动填写其他吊钩</option>
+              <option value="manual">手动填写吊钩组质量</option>
             </select>
           </label>
           <div class="pair">
             <label v-if="customHook"
-              >吊钩自重 / t<input
+              >吊钩组质量 / t<input
                 type="number"
                 step="any"
                 min="0.000001"
@@ -306,7 +320,7 @@ async function save(fmt: string) {
                 v-model="form.hook"
             /></label>
             <label
-              >索具 / t<input
+              >吊具及索具质量 / t<input
                 required
                 type="number"
                 step="any"
@@ -318,7 +332,7 @@ async function save(fmt: string) {
             <summary>系数</summary>
             <div class="pair">
               <label
-                >动载系数<input required type="number" step="any" min=".001" v-model="form.factor" /></label
+                >索具动载系数<input required type="number" step="any" min=".001" v-model="form.factor" /></label
               ><label
                 >负荷率上限<input required type="number" step="any" min=".001" max="1" v-model="form.limit" /></label
               >
@@ -334,27 +348,27 @@ async function save(fmt: string) {
           <p class="status" :data-state="cap?.status">
             {{ cap?.status || '待计算' }}
           </p>
-          <span class="radius-label">采用幅度</span>
+          <span class="radius-label">{{ form.radiusMode === '指定工作幅度' ? '采用的表列工作幅度' : '校核满足的最大工作幅度' }}</span>
           <strong class="metric"
             >{{ cap?.max_radius ?? '—' }} <small>m</small></strong
           >
           <p>{{ cap?.explanation || '等待有效工况' }}</p>
           <dl>
-            <dt>采用吊钩自重</dt>
+            <dt>采用吊钩组质量</dt>
             <dd>{{ cap?.hook_mass || '—' }} t</dd>
-            <dt>计算荷载</dt>
+            <dt>计算总起重量</dt>
             <dd>{{ cap?.required.toFixed(3) ?? '—' }} t</dd>
-            <dt>额定载荷</dt>
+            <dt>表列额定总起重量</dt>
             <dd>{{ cap?.rated_load ?? '—' }} t</dd>
-            <dt>采用臂长</dt>
+            <dt>采用的起重臂长度</dt>
             <dd>{{ cap?.boom_len ?? '—' }} m</dd>
-            <dt>表档起升高度</dt>
+            <dt>表列起升高度</dt>
             <dd>{{ cap?.lift_height ?? '—' }} m</dd>
-            <dt>捆扎后索具净高{{ load?.sling_height_derived ? "（估算）" : "" }}</dt>
+            <dt>吊物顶面至吊钩中心的竖向距离{{ load?.sling_height_derived ? "（估算）" : "" }}</dt>
             <dd>{{ load?.sling_height_m?.toFixed(2) ?? '—' }} m</dd>
-            <dt>所需起升高度</dt>
+            <dt>所需吊钩中心离地高度</dt>
             <dd>{{ load?.required_lift_height_m?.toFixed(2) ?? '—' }} m</dd>
-            <dt>名义最大索力</dt>
+            <dt>名义最大吊索拉力</dt>
             <dd>{{ load?.max_force_t != null ? (load.max_force_t * 9.80665).toFixed(2) : '—' }} kN</dd>
             <dt>负荷率</dt>
             <dd>
@@ -365,8 +379,8 @@ async function save(fmt: string) {
               }}
             </dd>
           </dl>
-          <details v-if="load?.slings.length" class="sling-range"><summary>四索静力分载范围</summary>
-            <table><thead><tr><th>吊索</th><th>名义 / kN</th><th>范围 / kN</th></tr></thead>
+          <details v-if="load?.slings.length" class="sling-range"><summary>各吊索静力拉力范围</summary>
+            <table><thead><tr><th>吊索</th><th>名义拉力 / kN</th><th>静力范围 / kN</th></tr></thead>
               <tbody><tr v-for="s in load.slings" :key="s.index"><th>{{s.name}}</th>
                 <td>{{(s.force_t*9.80665).toFixed(2)}}</td>
                 <td>{{s.equilibrium_min_kn.toFixed(2)}}–{{s.equilibrium_max_kn.toFixed(2)}}</td></tr></tbody></table>
@@ -392,7 +406,7 @@ async function save(fmt: string) {
           </div>
         </nav>
         <nav v-else class="stage-title">
-          <strong>货物图 · 尺寸 / 重量 / 重心</strong>
+          <strong>吊物示意图 · 尺寸 / 质量 / 重心</strong>
           <span class="muted">第 {{ step }} 步</span>
         </nav>
         <div v-if="showResult && snapshot && tab === 'sheet'" class="paper">
@@ -413,7 +427,7 @@ async function save(fmt: string) {
         <CadPane v-if="usedCad && showResult && snapshot" v-show="tab === 'cad'" :snapshot="snapshot" />
         <div v-if="!showResult || tab === 'sheet'" class="caption">
           {{ showResult && tab === 'sheet'
-            ? '点击图纸放大 · A3 立面 · 图示姿态不等于现场净空校核'
+            ? '点击图纸放大 · A3 立面 · 现场净空需另行校核'
             : '固定轴测视图 · 虚线连接吊钩与重心 G' }}
         </div>
       </section>

@@ -67,7 +67,7 @@ def test_exact_mid_swing_clearance(api, rotation, threshold, status):
     info = r["clearance"]
     half_step_sweep = math.sqrt(17)*math.radians(.5)
     assert exact - half_step_sweep <= info["lower_m"] <= exact + 1e-12
-    assert info["pair"] == "吊物 / 障碍1"
+    assert info["pair"] == "吊物 / 障碍物 1 禁入区"
     if threshold == .30:  # Uniform intervals: the limiting bound contains an exact minimizer.
         offset = math.degrees(math.atan2(1,4))
         assert any(info["start"]*90 <= yaw <= info["end"]*90 for yaw in (45-offset,45+offset))
@@ -78,10 +78,9 @@ def test_exact_mid_swing_clearance(api, rotation, threshold, status):
     assert all(s["start"] < s["end"] for s in segments)
     unsafe = {m for segment in r["segments"] for m in segment["unsafe"]}
     unknown = {m for segment in r["segments"] for m in segment["unknown"]}
-    assert ("吊物 / 障碍1 平面净距不足" in unsafe) == (status == "fail")
+    assert ("吊物 / 障碍物 1 禁入区 水平净距不足" in unsafe) == (status == "fail")
     if status != "fail":
-        assert ("吊物 / 障碍1 未证实达到要求的平面净距" in unknown) == (status == "unknown")
-    assert all("A全段可用钩高待核" in s["unknown"] for s in r["segments"])
+        assert ("吊物 / 障碍物 1 禁入区 未证实达到要求的水平净距" in unknown) == (status == "unknown")
 
 
 @pytest.mark.parametrize("mass,gross,fails", [(20,11.946,False), (21,12.496,True)])
@@ -95,7 +94,7 @@ def test_qy70_exact_chart_boundary(api, rotation, mass, gross, fails):
     assert r["loads"] == pytest.approx([gross,gross])
     segment, = r["segments"]
     assert segment["ratios"] == pytest.approx([gross/15.5]*2)
-    assert set(segment["unsafe"]) == ({"A表档负荷率超限","B表档负荷率超限"} if fails else set())
+    assert set(segment["unsafe"]) == ({"A 机起重性能表负荷率超限","B 机起重性能表负荷率超限"} if fails else set())
     assert not segment["unknown"]
 
 
@@ -179,12 +178,12 @@ def test_dual_rotation_crosses_sany_chart_step(api, rotation):
     for segment in (segments[0], segments[-1]):
         assert segment["radii"][1][1] < 10
         assert segment["ratios"][1] == pytest.approx(28.565 / 39)
-        assert "B表档负荷率超限" not in segment["unsafe"]
+        assert "B 机起重性能表负荷率超限" not in segment["unsafe"]
     for segment in middle:
         low, high = segment["radii"][1]
         assert low <= 10.1 <= high
         assert segment["ratios"][1] == pytest.approx(28.565 / 32)
-        assert "B表档负荷率超限" in segment["unsafe"]
+        assert "B 机起重性能表负荷率超限" in segment["unsafe"]
 
 
 @pytest.mark.parametrize("total,factor,radius,booms,ratings,limit,expected_t,percent", [
