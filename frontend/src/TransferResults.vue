@@ -125,6 +125,8 @@ async function save(id: string) {
       <section v-for="(crane,i) in cranes" :key="crane.name" class="metric">
         <h3>{{crane.name}} 机计算总起重量</h3>
         <div class="metric-value">{{plan.loads[i].toFixed(2)}} <small>t</small></div>
+        <p>{{plan.configurations[i].brand}} {{plan.configurations[i].model}} · 起重臂长度 {{plan.configurations[i].boom}} m</p>
+        <p>起重性能表工况 {{plan.configurations[i].config}}</p>
         <p>分担的吊物质量 {{(mass * plan.shares[i]).toFixed(2)}} t（{{(plan.shares[i] * 100).toFixed(1)}}%）</p>
         <p>工作幅度上界 {{up(crane.maxRadius)}} m</p>
         <p>涉及表列工况的最高负荷率
