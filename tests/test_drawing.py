@@ -9,8 +9,10 @@ from __future__ import annotations
 import ast
 import math
 import re
+from io import BytesIO
 from itertools import combinations
 from pathlib import Path
+from xml.etree import ElementTree
 
 import pytest
 
@@ -186,6 +188,32 @@ def test_elevation_stays_inside_the_sheet(repo: Repo) -> None:
             continue
         assert box[0] >= -0.01 and box[2] <= width + 0.01, f"{item} 超出图幅宽度"
         assert box[1] >= -0.01 and box[3] <= height + 0.01, f"{item} 超出图幅高度"
+
+
+def test_single_workbench_attribution_is_used_for_drawing_and_report(repo: Repo, tmp_path: Path) -> None:
+    import ezdxf
+    from docx import Document
+
+    from liftcalc.dusk import DesktopApi
+
+    project, author = "列车上轨工程 <试用>", "李工 & 王工"
+    api = DesktopApi(repo)
+    snapshot = api.calculate(_case(meta={"project": project, "author": author}))
+    texts = {node.text for node in ElementTree.fromstring(snapshot["svg"]).iter("{http://www.w3.org/2000/svg}text")}
+    assert {project, author} <= texts
+    path = tmp_path / "attributed.dxf"
+    path.write_bytes(api.render(snapshot["id"], "dxf")[0])
+    assert {project, author} <= {text.dxf.text for text in ezdxf.readfile(path).modelspace().query("TEXT")}
+
+    report = Document(BytesIO(api.render(snapshot["id"], "docx")[0]))
+    summary = [[cell.text for cell in row.cells] for row in report.tables[0].rows]
+    assert ["工程名称", project] in summary and ["设计人", author] in summary
+    html, name = api.render(snapshot["id"], "html")
+    assert name.endswith(".html") and html.decode() == api.report(snapshot["id"])
+    assert "<script" not in html.decode() and "data:image/svg+xml;base64," in html.decode()
+    assert "列车上轨工程 &lt;试用&gt;" in html.decode()
+    assert "徐工70~500吨汽车吊参数表" in html.decode() and ".capacity.csv" not in html.decode()
+    assert len(report.inline_shapes) == 1
 
 
 def test_elevation_does_not_collide_with_furniture(repo: Repo) -> None:

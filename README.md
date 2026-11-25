@@ -18,6 +18,10 @@ python -m venv .venv
 
 以后双击 `启动单机工作台.cmd` 即可进入首页，选择单机或双机。首次安装依赖需要联网；之后界面、车型数据和 DXF 查看器均可离线使用。桌面端每次从随仓库提供的数据包建立临时数据库。
 
+首页的「工程署名」可填写本次工程名称和设计人。单机、双机图纸的标题栏和计算书会采用这些信息。
+
+生成结果后，点击「计算书预览」即可阅读本次校核正文和附图。可从预览窗口导出自包含的 HTML 或保存可编辑的 Word 文档。双机未生成可用轨迹时，计算书保留输入条件和搜索记录中的阻碍。
+
 窗口默认最大化，右上角可切换浅色或深色。默认使用 pywebview 和 WebView2；原生宿主启动失败时，程序会尝试 Edge 或 Chrome 独立窗口。启动异常可查看 `%TEMP%\liftcalc-error.log`。
 
 ## 单机吊装
@@ -30,7 +34,7 @@ python -m venv .venv
 
 单机计算总起重量为 **吊物质量 + 吊钩组质量 + 吊索具质量 × 索具动载系数**。指定工作幅度介于两列之间时，按同一工况和臂长内较大的表列幅度校核负荷率。若需要校核指定工作幅度下的起升高度，缺少对应资料时会提示资料不足。四索受力结果以 kN 显示名义拉力及各索静力平衡范围，各索的上限可对应不同的平衡状态。
 
-单机支持导出 DXF、SVG、PNG 和 Word 计算书。图纸可放大、拖动和平移，CAD 查看器可以只读打开本次 DXF 或 32 MB 以内的本地 DXF。[CAD 查看器截图](docs/handover/assets/refract-cad.png)
+单机图纸支持导出 DXF、SVG 和 PNG。图纸可放大、拖动和平移，CAD 查看器可以只读打开本次 DXF 或 32 MB 以内的本地 DXF。[CAD 查看器截图](docs/handover/assets/refract-cad.png)
 
 ## 双机抬吊上轨
 
@@ -180,7 +184,7 @@ flowchart LR
     Result --> Draw["Figure 矢量图元"]
     Route --> Draw
     Draw --> Files["SVG / PNG / DXF"]
-    Result --> Report["Word 计算书"]
+    Result --> Report["设计计算书预览与导出"]
     Route --> UI
 ```
 
@@ -191,7 +195,7 @@ flowchart LR
 | CLI 与服务层 | [cli/main.py](src/liftcalc/cli/main.py)、[services/cases.py](src/liftcalc/services/cases.py)、[services/calc.py](src/liftcalc/services/calc.py) | CLI 读取 JSON 或 YAML 工况，`run_case` 按工况类型校验并调度。输出结构由 [core/result.py](src/liftcalc/core/result.py) 定义，其中 `CheckResult` 记录单项判定、代入值、单位及数据来源，`ComputationResult` 汇总校核项、警告和出图数据。 |
 | 计算内核 | [crane/](src/liftcalc/crane)、[lifting/](src/liftcalc/lifting)、[geometry/](src/liftcalc/geometry) | 起重性能表校核、吊物及索力、吊耳、吊梁与几何计算。[sections/](src/liftcalc/sections)、[fea/](src/liftcalc/fea) 和 [codecheck/](src/liftcalc/codecheck) 分别处理截面、平面杆系和构件校核。 |
 | 数据层 | [data/importer.py](src/liftcalc/data/importer.py)、[schema.sql](src/liftcalc/data/schema.sql)、[data/repo.py](src/liftcalc/data/repo.py) | 从 CSV 建 SQLite 库。只读 `Repo` 按品牌、机型、工况和臂长查询离散表值，另向界面提供标称吨位、主吊钩组及各臂长的最大表列额定总起重量。 |
-| 图纸与计算书 | [drawing/](src/liftcalc/drawing)、[report/render.py](src/liftcalc/report/render.py) | 将结果转换为图件或 Word。SVG、PNG、DXF 共用图元、图层、尺寸和标注位置。 |
+| 图纸与计算书 | [drawing/](src/liftcalc/drawing)、[report/content.py](src/liftcalc/report/content.py)、[report/render.py](src/liftcalc/report/render.py) | SVG、PNG 和 DXF 共用图元及标注位置。计算书从单机或双机校核快照组织正文、判据和证据，再将同一份内容输出为可预览的 HTML 和可编辑的 DOCX。 |
 
 ### 单机计算链
 

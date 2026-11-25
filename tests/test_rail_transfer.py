@@ -3,6 +3,7 @@ import math
 import random
 from itertools import combinations
 from pathlib import Path
+from xml.etree import ElementTree
 
 import ezdxf
 import pytest
@@ -171,6 +172,28 @@ def test_missing_manual_configuration_for_automatic_boom_reports_reason(data):
     assert "A 机" in result["reasons"][0] and "未收录工况" in result["reasons"][0]
 
 
+def test_dual_workbench_places_attribution_on_all_four_drawings(data):
+    from io import BytesIO
+
+    from docx import Document
+
+    project, author = "双机抬吊上轨工程", "李工"
+    data["meta"] = {"project": project, "author": author}
+    api = DesktopApi(Repo(ROOT/"data/liftcalc.sqlite"))
+    result = api.calculate(data)
+    assert result["status"] == "planned" and len(result["drawings"]) == 4
+    for drawing in result["drawings"]:
+        svg = ElementTree.fromstring(api.render(drawing["id"], "svg")[0])
+        texts = {node.text for node in svg.iter("{http://www.w3.org/2000/svg}text")}
+        assert {project, author} <= texts
+    html = api.report(result["report_id"])
+    assert all(text in html for text in (project, author, "静力分载与起重机工况", "转运路径与分段校核"))
+    assert html.count("data:image/svg+xml;base64,") == 4 and ".capacity.csv" not in html
+    docx = Document(BytesIO(api.render(result["report_id"], "docx")[0]))
+    assert len(docx.inline_shapes) == 4
+    assert docx.sections[-1].page_width > docx.sections[-1].page_height
+
+
 def test_mid_transfer_collision_and_exports(data, tmp_path):
     api = DesktopApi(Repo(ROOT/"data/liftcalc.sqlite"))
     data["transfer"]["obstacles"] = [[0, 0, .6]]
@@ -228,9 +251,12 @@ def test_transfer_overload_reports_first_witness_and_chart(data):
 def test_unplanned_transfer_reports_blocked_pickup(data):
     case = data["transfer"]
     case.update(auto_route=True, obstacles=[[*case["start"][:2], .6]])
-    result = DesktopApi(Repo(ROOT/"data/liftcalc.sqlite")).calculate(data)
+    api = DesktopApi(Repo(ROOT/"data/liftcalc.sqlite"))
+    result = api.calculate(data)
     assert result["status"] == "unplanned"
     assert any("起吊" in reason and "障碍物 1 禁入区" in reason for reason in result["reasons"])
+    html = api.report(result["report_id"])
+    assert "未生成可用轨迹的原因" in html and "障碍物 1 禁入区" in html
     assert "poses" not in result and "drawings" not in result
 
 

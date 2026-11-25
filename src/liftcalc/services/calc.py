@@ -1163,6 +1163,7 @@ def _capability_case(case: CapabilityCase, repo: Repo | None) -> ComputationResu
         aux["capability"] = {
             "mode": "single",
             "model": case.crane.model,
+            "source_doc": model_row.get("source_doc") if model_row else None,
             "required": required,
             "hook_mass": hook_mass,
             "hook_rated_t": selected_hook["rated_t"] if selected_hook else None,
@@ -1262,6 +1263,7 @@ def _capability_case(case: CapabilityCase, repo: Repo | None) -> ComputationResu
             "mode": "dual",
             "model": case.crane.model,
             "second_model": case.second.model,
+            "hook_mass": hook_mass,
             "required": required,
             "limit": limit,
             "left_share": split.left_share,

@@ -279,8 +279,8 @@ def test_report_has_load_and_cg_section(repo: Repo, tmp_path: Path) -> None:
     document = Document(path)
     headings = [paragraph.text for paragraph in document.paragraphs
                 if paragraph.style.name.startswith("Heading")]
-    assert "3.1 吊物与重心" in headings
-    assert sum("起重能力校核过程" in heading for heading in headings) == 1
+    assert "2 吊物与重心" in headings
+    assert "3 采用工况与逐项校核" in headings
     tables = [[[cell.text for cell in row.cells] for row in table.rows]
               for table in document.tables]
     joined = "\n".join(
@@ -301,7 +301,7 @@ def test_dual_report_shows_split(repo: Repo, tmp_path: Path) -> None:
     document = Document(path)
     headings = [paragraph.text for paragraph in document.paragraphs
                 if paragraph.style.name.startswith("Heading")]
-    assert "3.1.1 双机抬吊的负荷分配" in headings
+    assert "3 双机抬吊的负荷分配" in headings
     joined = "\n".join(paragraph.text for paragraph in document.paragraphs)
     assert "按重心位置分配" in joined
 

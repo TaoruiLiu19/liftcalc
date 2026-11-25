@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref } from 'vue'
 import SheetViewer from './SheetViewer.vue'
+import ReportPreview from './ReportPreview.vue'
 import TransferPlot from './TransferPlot.vue'
 import type { TransferEvidence, TransferOutcome, TransferScene } from './types'
 
@@ -112,7 +113,10 @@ async function save(id: string) {
 <section class="transfer-output">
   <header class="results-heading">
     <h2 tabindex="-1">双机抬吊上轨校核结果</h2>
-    <button type="button" @click="emit('back')">返回转运与场地</button>
+    <div class="result-actions">
+      <ReportPreview v-if="outcome.report_id" :report-id="outcome.report_id" />
+      <button type="button" @click="emit('back')">返回转运与场地</button>
+    </div>
   </header>
 
   <template v-if="plan">
@@ -215,6 +219,7 @@ async function save(id: string) {
 </template>
 
 <style scoped>
+.result-actions{display:flex;flex-wrap:wrap;gap:8px}
 .transfer-output{padding:clamp(12px,2vw,24px);background:var(--tile);border:1px solid var(--line);border-radius:16px}
 .results-heading,.sheets header,.issue-heading{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .results-heading,.sheets header{padding:0;border:0;background:none}
