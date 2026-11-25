@@ -92,6 +92,7 @@ export type TransferResult = {
   load_limit: number
   poses: number[][]
   stations: {center: number[]; heading: number}[]
+  configurations: {brand: string; model: string; config: string; boom: number}[]
   drawings: { id: string; title: string; kind: 'statics' | 'trajectory' | 'elevation-a' | 'elevation-b'; svg: string }[]
   shares: number[]
   loads: number[]

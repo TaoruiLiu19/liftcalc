@@ -33,10 +33,13 @@ def overlaps(a: Rect, b: Rect, *, margin: float = 0.0) -> bool:
 
 def text_in_band(figure: Figure, x: float, y_bottom: float, band_h: float,
                  content: str, height: float, *, align: str = ALIGN_LEFT,
-                 layer: str = LAYER_TEXT) -> None:
+                 layer: str = LAYER_TEXT, max_width: float | None = None) -> None:
     """在高度 band_h 的横带内把文字竖直居中（y = 字框顶边）。"""
     if not content:
         return
+    if max_width is not None:
+        # Leave room for differences between the SVG, PNG and CAD fonts.
+        height = min(height, max_width / text_width(content, 1.0) / 1.12)
     figure.add(
         Text(x=x, y=y_bottom + (band_h + height) / 2.0, content=content,
              height=height, align=align, layer=layer)
@@ -154,22 +157,23 @@ def title_block(figure: Figure, sheet: Sheet, *, title: str, subtitle: str,
     for y in (row_a, row_b, row_c):
         figure.add(Line(x1=x0, y1=y, x2=x1, y2=y, layer=LAYER_TEXT))
 
-    text_in_band(figure, x0 + 3.0, row_a, y1 - row_a, title, 4.2)
-    text_in_band(figure, x1 - 3.0, row_a, y1 - row_a, subtitle, 3.4, align=ALIGN_RIGHT)
+    text_in_band(figure, x0 + 3.0, row_a, y1 - row_a, title, 4.2, max_width=98.0)
+    text_in_band(figure, x1 - 3.0, row_a, y1 - row_a, subtitle, 3.4, align=ALIGN_RIGHT, max_width=43.0)
 
     # 第二行：工程名称 | 图号 | 比例
     cols = (x0 + 80.0, x0 + 116.0)
     for x in cols:
         figure.add(Line(x1=x, y1=row_b, x2=x, y2=row_a, layer=LAYER_TEXT))
     label_h = 3.4
-    for offset_x, label, value in (
-        (x0, "工程名称", project),
-        (cols[0], "图号", drawing_no),
-        (cols[1], "比例", scale_text),
+    for left, right, label, value in (
+        (x0, cols[0], "工程名称", project),
+        (cols[0], cols[1], "图号", drawing_no),
+        (cols[1], x1, "比例", scale_text),
     ):
-        text_in_band(figure, offset_x + 2.5, row_a - label_h, label_h, label, 2.0,
+        text_in_band(figure, left + 2.5, row_a - label_h, label_h, label, 2.0,
                      layer=LAYER_NOTE)
-        text_in_band(figure, offset_x + 2.5, row_b, row_a - row_b - label_h, value, 2.5)
+        text_in_band(figure, left + 2.5, row_b, row_a - row_b - label_h, value, 2.5,
+                     max_width=right - left - 5)
 
     # 第三行：设计/校核/审核/批准
     sign_cols = (x0 + 38.0, x0 + 76.0, x0 + 114.0)
@@ -185,17 +189,14 @@ def title_block(figure: Figure, sheet: Sheet, *, title: str, subtitle: str,
     foot_cols = (x0 + 38.0, x0 + 80.0, x0 + 116.0)
     for x in foot_cols:
         figure.add(Line(x1=x, y1=y0, x2=x, y2=row_c, layer=LAYER_TEXT))
-    foot = (
-        (x0, "日期", date),
-        (x0 + 38.0, "版本", "v0.1"),
-        (x0 + 80.0, "页次", sheet_no),
-        (x0 + 116.0, "编号", drawing_no),
-    )
     band = row_c - y0
-    for x, label, value in foot:
-        text_in_band(figure, x + 2.5, y0 + 3.6, band - 3.6, label, 2.0,
+    for left, right, label, value in zip(
+        (x0, *foot_cols), (*foot_cols, x1), ("日期", "版本", "页次", "编号"),
+        (date, "v0.1", sheet_no, drawing_no), strict=True,
+    ):
+        text_in_band(figure, left + 2.5, y0 + 3.6, band - 3.6, label, 2.0,
                      layer=LAYER_NOTE)
-        text_in_band(figure, x + 2.5, y0, 3.6, value, 2.2)
+        text_in_band(figure, left + 2.5, y0, 3.6, value, 2.2, max_width=right - left - 5)
 
     return (x0, y0, x1, y1)
 
@@ -208,19 +209,23 @@ def perf_table(figure: Figure, x_right: float, y_top: float, rows: list[tuple[st
     height = head_h + row_h * len(rows)
     x0 = x_right - width
     y0 = y_top - height
+    divider = x0 + min(30.0, width * .4)
+    pad = 2.0
 
     figure.add(Polyline(points=((x0, y0), (x_right, y0), (x_right, y_top), (x0, y_top)),
                         closed=True, layer=LAYER_TEXT))
     figure.add(Line(x1=x0, y1=y_top - head_h, x2=x_right, y2=y_top - head_h,
                     layer=LAYER_TEXT))
-    text_in_band(figure, x0 + 2.0, y_top - head_h, head_h, title, 2.8)
-    figure.add(Line(x1=x0 + 26.0, y1=y0, x2=x0 + 26.0, y2=y_top - head_h,
+    text_in_band(figure, x0 + pad, y_top - head_h, head_h, title, 2.8, max_width=width - 2*pad)
+    figure.add(Line(x1=divider, y1=y0, x2=divider, y2=y_top - head_h,
                     layer=LAYER_THIN))
 
     for index, (label, value) in enumerate(rows):
         band_bottom = y_top - head_h - row_h * (index + 1)
-        text_in_band(figure, x0 + 2.0, band_bottom, row_h, label, 2.3, layer=LAYER_NOTE)
-        text_in_band(figure, x0 + 28.0, band_bottom, row_h, value, 2.4)
+        text_in_band(figure, x0 + pad, band_bottom, row_h, label, 2.3, layer=LAYER_NOTE,
+                     max_width=divider - x0 - 2*pad)
+        text_in_band(figure, divider + pad, band_bottom, row_h, value, 2.4,
+                     max_width=x_right - divider - 2*pad)
         if index < len(rows) - 1:
             figure.add(Line(x1=x0, y1=band_bottom, x2=x_right, y2=band_bottom,
                             layer=LAYER_THIN))

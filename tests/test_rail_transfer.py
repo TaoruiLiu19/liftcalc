@@ -1,13 +1,15 @@
 import json
 import math
+import random
 from itertools import combinations
 from pathlib import Path
 
 import ezdxf
 import pytest
 
-from liftcalc.crane.transfer import (Box, Transfer, analyze, candidate_rank, candidate_routes, clearance, interpolate_hook,
-                                     plan_transfer, segment_gap, station_shift, world)
+from liftcalc.crane.transfer import (Box, Transfer, analyze, candidate_rank, candidate_routes, clearance,
+                                     dominated_overload, interpolate_hook, plan_transfer, segment_gap, station_shift,
+                                     world)
 from liftcalc.data.repo import Repo
 from liftcalc.dusk import DesktopApi
 from liftcalc.drawing.annotation import _edges, stroke_text_interval
@@ -21,10 +23,16 @@ from liftcalc.drawing.transfer import crane_elevation, first_gate_crossing, shee
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_automatic_stagger_around_opposing_obstacles():
+@pytest.mark.parametrize("automatic_charts", [False, True])
+def test_automatic_stagger_around_opposing_obstacles(automatic_charts):
     data = json.loads((ROOT/"cases/rail-transfer-auto-stagger.json").read_text("utf8"))
-    assert all("center" not in c for c in data["transfer"]["cranes"])
+    left, right = data["transfer"]["cranes"]
+    assert all("center" not in c for c in (left, right))
+    if automatic_charts:
+        del left["config"], left["boom"], right["boom"]
     result = DesktopApi(Repo(ROOT/"data/liftcalc.sqlite")).calculate(data)
+    assert all(c["boom"] > 0 for c in result["configurations"])
+    assert result["configurations"][1]["config"] == right["config"]
     a,b = (c["center"] for c in result["stations"])
     assert a[0] > b[0] and math.dist(a,b) < data["transfer"]["length"]
     assert result["clearance"]["lower_m"] >= data["transfer"]["plan_clearance"]
@@ -43,6 +51,19 @@ def test_obstacle_shift_merges_overlaps_and_respects_corridor(data):
     assert station_shift(crane,obstacles,math.pi/2,.5,-6,13) == pytest.approx(12.5)
     assert station_shift(crane,obstacles,math.pi/2,.5,-6,12) is None
     assert station_shift(crane,[(0,3.4,1)],0,.5,-10,10) == pytest.approx(-6.2)
+
+
+def test_segment_to_footprint_matches_distances_to_its_edges():
+    rng = random.Random(123)
+    for heading in (0, 25, 90):
+        box = Box((1, -2), 10, 4, heading)
+        assert box.segment_distance((1, -2), (1, -2)) == 0
+        for _ in range(80):
+            a, b = ((rng.uniform(-12, 12), rng.uniform(-12, 12)) for _ in range(2))
+            expected = min(segment_gap(a, b, box.corners[i-1], p) for i, p in enumerate(box.corners))
+            if box.separation((*a, 1, 0), 0, 0) <= 0 or box.separation((*b, 1, 0), 0, 0) <= 0:
+                expected = 0
+            assert box.segment_distance(a, b) == pytest.approx(expected, abs=1e-12)
 
 
 def test_staggered_cranes_allow_oblique_passage():
@@ -106,6 +127,48 @@ def test_split_and_transverse_equilibrium(data):
     case.cg = (5,0,0)
     with pytest.raises(ValueError,match="之间"):
         case.shares()
+
+
+def test_automatic_charts_use_one_configuration_and_boom_for_the_whole_route(data):
+    class ChartRepo:
+        def model_capacity(self, _brand, _model):
+            return [dict(config_name=config, boom_len=boom, radius=radius, rated_load=load)
+                    for config, boom, radii, load in (
+                        ("近幅工况", 15, (1, 6), 80),
+                        ("远幅工况", 40, (6, 35), 80),
+                        ("通用工况", 20, (1, 35), 8),
+                        ("通用工况", 25, (1, 35), 22),
+                        ("指定工况", 30, (1, 35), 8),
+                        ("指定工况", 35, (1, 35), 16),
+                    ) for radius in radii]
+
+    left, right = data["transfer"]["cranes"]
+    del left["config"], left["boom"], right["boom"]
+    right["config"] = "指定工况"
+    case = Transfer.model_validate(data["transfer"])
+    selected, result = plan_transfer(case, ChartRepo(), diagnostics=True)
+    assert [(c.config, c.boom) for c in selected.cranes] == [("通用工况", 25), ("指定工况", 35)]
+    for segment in result["segments"]:
+        assert segment["ratios"] == pytest.approx([result["loads"][0]/22, result["loads"][1]/16])
+        assert not any("性能表" in reason or "负荷率" in reason
+                       for reason in segment["unsafe"] + segment["unknown"])
+
+    case.mass = 24
+    selected, result = plan_transfer(case, ChartRepo(), diagnostics=True)
+    assert (selected.cranes[1].config, selected.cranes[1].boom) == ("指定工况", 35)
+    reason = "B 机起重性能表负荷率超限"
+    first = next(segment for segment in result["segments"] if reason in segment["unsafe"])
+    assert first["evidence"][reason]["progress"] == 0
+    assert "16.00 t" in first["evidence"][reason]["text"]
+
+
+def test_missing_manual_configuration_for_automatic_boom_reports_reason(data):
+    crane = data["transfer"]["cranes"][0]
+    crane.pop("boom")
+    crane["config"] = "未收录工况"
+    result = DesktopApi(Repo(ROOT/"data/liftcalc.sqlite")).calculate(data)
+    assert result["status"] == "unplanned"
+    assert "A 机" in result["reasons"][0] and "未收录工况" in result["reasons"][0]
 
 
 def test_mid_transfer_collision_and_exports(data, tmp_path):
@@ -385,10 +448,24 @@ def test_clearance_threshold_uses_station_edges(data):
 
 
 def test_planner_prefers_verified_then_pending_then_known_failure():
-    def rank(unsafe,unknown,ratio):
+    def rank(unsafe,unknown,ratio,**options):
         return candidate_rank([dict(unsafe=unsafe,unknown=unknown,ratios=[ratio],
-                                    radii=[(5,6),(5,6)])],1,5)
+                                    radii=[(5,6),(5,6)])],1,5,**options)
     assert rank([],[],.75) < rank([],["缺表"],None) < rank(["超限"],[],.85)
+    assert (rank(["超限"],[],.85,prefer_chart_coverage=True)
+            < rank([],["A 机工作幅度无性能表数据"],None,prefer_chart_coverage=True))
+
+
+def test_overload_pruning_requires_unavoidable_failures_as_well_as_a_worse_radius(data):
+    case = Transfer.model_validate(data["transfer"])
+    capacities_below_load = ((0, 50), (4, 4))
+    capacities_above_load = ((0, 50), (20, 20))
+    loads = (8, 8)
+    incumbent = (2, 2, 0, 8.0)
+    assert dominated_overload(case.route, case, loads, [capacities_below_load]*2, incumbent)
+    assert not dominated_overload(case.route, case, loads,
+                                  [capacities_below_load, capacities_above_load], incumbent)
+    assert not dominated_overload(case.route, case, loads, [capacities_below_load]*2, (2, 2, 0, 50.0))
 
 
 def test_lattice_certifies_two_radius_caps_and_rejects_unreachable_endpoint():
